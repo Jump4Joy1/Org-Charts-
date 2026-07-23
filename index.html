@@ -1,0 +1,396 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>OrgChart — Hierarchy Builder</title>
+<meta name="description" content="Build professional org charts and hierarchies on your iPhone.">
+<meta name="theme-color" content="#141a22" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f4f6f8" media="(prefers-color-scheme: light)">
+
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="OrgChart">
+<link rel="icon" href="icons/icon-192.png">
+
+<style>
+:root{
+  --bg:#f4f6f8; --panel:#ffffff; --panel2:#eef1f4; --text:#1c2530; --muted:#6b7684;
+  --line:#dbe0e6; --accent:#3568d4; --accent2:#274a99; --danger:#d64545;
+  --shadow: 0 2px 10px rgba(20,26,34,.08);
+  --chart-font: -apple-system,BlinkMacSystemFont,'SF Pro Text',Segoe UI,Roboto,Arial,sans-serif;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#12161c; --panel:#1b2129; --panel2:#232a33; --text:#eef1f5; --muted:#93a0b0;
+    --line:#2c3541; --danger:#f0665f;
+    --shadow: 0 2px 14px rgba(0,0,0,.4);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#12161c; --panel:#1b2129; --panel2:#232a33; --text:#eef1f5; --muted:#93a0b0;
+  --line:#2c3541; --danger:#f0665f;
+  --shadow: 0 2px 14px rgba(0,0,0,.4);
+}
+:root[data-theme="light"]{
+  --bg:#f4f6f8; --panel:#ffffff; --panel2:#eef1f4; --text:#1c2530; --muted:#6b7684;
+  --line:#dbe0e6; --danger:#d64545;
+  --shadow: 0 2px 10px rgba(20,26,34,.08);
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+html,body{height:100%;overscroll-behavior:none;}
+body{
+  margin:0; background:var(--bg); color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',Segoe UI,Roboto,Arial,sans-serif;
+  overflow:hidden; touch-action:none; position:fixed; inset:0;
+}
+#app{position:absolute; inset:0; display:flex; flex-direction:column;}
+
+/* ---- Top bar ---- */
+#topbar{
+  flex:0 0 auto; display:flex; align-items:center; gap:8px;
+  padding:calc(var(--safe-top) + 10px) calc(var(--safe-right) + 12px) 10px calc(var(--safe-left) + 12px);
+  background:var(--panel); border-bottom:1px solid var(--line); box-shadow:var(--shadow); z-index:20;
+}
+#chartName{
+  flex:1; font-size:17px; font-weight:600; background:none; border:none; color:var(--text);
+  padding:6px 8px; border-radius:8px; min-width:0; text-overflow:ellipsis;
+}
+#chartName:focus{background:var(--panel2); outline:none;}
+.iconbtn{
+  flex:0 0 auto; width:38px; height:38px; border-radius:10px; border:none; background:var(--panel2);
+  color:var(--text); font-size:18px; display:flex; align-items:center; justify-content:center; cursor:pointer;
+}
+.iconbtn:active{background:var(--line);}
+
+/* ---- Stage ---- */
+#stage{flex:1; position:relative; overflow:hidden; background:
+  radial-gradient(var(--line) 1px, transparent 1px) 0 0/22px 22px, var(--bg);
+}
+#canvas{position:absolute; left:0; top:0; transform-origin:0 0; will-change:transform; font-family:var(--chart-font);}
+svg#edges{position:absolute; left:0; top:0; overflow:visible; pointer-events:none;}
+.edge{fill:none; stroke:var(--accent); stroke-width:2; opacity:.55;}
+
+.node{
+  position:absolute; width:168px; touch-action:none; user-select:none;
+  background:var(--panel); border:1px solid var(--line); border-radius:14px; box-shadow:var(--shadow);
+  padding:10px 12px; display:flex; flex-direction:column; align-items:center; text-align:center; gap:4px;
+  transition:box-shadow .12s, transform .12s, border-radius .15s;
+}
+.node.dragging{box-shadow:0 10px 26px rgba(0,0,0,.25); z-index:50; transform:scale(1.03);}
+.node.dragover{outline:3px solid var(--accent); outline-offset:2px;}
+.node .avatar{
+  width:44px; height:44px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+  color:#fff; font-weight:700; font-size:15px; margin-bottom:2px; flex:0 0 auto; background-size:cover; background-position:center;
+  transition:background-color .15s, border-color .15s;
+}
+.node .nname{font-size:14.5px; font-weight:600; line-height:1.25; word-break:break-word;}
+.node .ntitle{font-size:12px; color:var(--muted); line-height:1.2; word-break:break-word;}
+.node .addchild{
+  position:absolute; left:50%; bottom:-14px; transform:translateX(-50%);
+  width:28px; height:28px; border-radius:50%; background:var(--accent); color:#fff; border:2px solid var(--panel);
+  font-size:17px; line-height:1; display:flex; align-items:center; justify-content:center; box-shadow:var(--shadow);
+}
+
+/* card style: classic — squared corners, no shadow, colored top bar */
+#canvas.card-classic .node{ border-radius:6px; box-shadow:none; border:1px solid var(--line); border-top:4px solid var(--node-color, var(--accent)); }
+#canvas.card-classic .node.dragging{ box-shadow:0 8px 20px rgba(0,0,0,.22); }
+/* card style: minimal — flat, colored outline, ringed avatar */
+#canvas.card-minimal .node{ border-radius:10px; box-shadow:none; border:1.5px solid var(--node-color, var(--line)); }
+#canvas.card-minimal .node .avatar:not(.has-photo){ background:transparent !important; border:2px solid var(--node-color, var(--accent)); color:var(--node-color, var(--accent)) !important; }
+#canvas.card-minimal .node .avatar.has-photo{ border:2px solid var(--node-color, var(--accent)); }
+
+/* layout direction: horizontal — add-child button sits on the trailing (right) edge */
+#canvas.dir-horizontal .node .addchild{ left:auto; right:-14px; top:50%; bottom:auto; transform:translateY(-50%); }
+
+/* ---- Empty state ---- */
+#empty{
+  position:absolute; inset:0; display:flex; align-items:center; justify-content:center; flex-direction:column;
+  gap:14px; padding:24px; text-align:center; color:var(--muted); pointer-events:none;
+}
+#empty h2{color:var(--text); margin:0; font-size:19px;}
+#empty p{margin:0; max-width:280px; font-size:14.5px;}
+
+/* ---- FAB ---- */
+#fab{
+  position:absolute; right:calc(var(--safe-right) + 18px); bottom:calc(var(--safe-bottom) + 22px);
+  width:56px; height:56px; border-radius:50%; background:var(--accent); color:#fff; border:none;
+  font-size:28px; box-shadow:var(--shadow); z-index:15; display:flex; align-items:center; justify-content:center;
+}
+#fab:active{background:var(--accent2);}
+.node .addchild:active{background:var(--accent2);}
+#fitbtn{
+  position:absolute; left:calc(var(--safe-left) + 18px); bottom:calc(var(--safe-bottom) + 22px);
+  width:44px; height:44px; border-radius:50%; background:var(--panel); color:var(--text); border:1px solid var(--line);
+  font-size:18px; box-shadow:var(--shadow); z-index:15; display:flex; align-items:center; justify-content:center;
+}
+
+/* ---- Sheets / modals ---- */
+.sheet-backdrop{
+  position:absolute; inset:0; background:rgba(10,14,20,.4); z-index:60; opacity:0; pointer-events:none;
+  transition:opacity .18s;
+}
+.sheet-backdrop.show{opacity:1; pointer-events:auto;}
+.sheet{
+  position:absolute; left:0; right:0; bottom:0; background:var(--panel); border-radius:18px 18px 0 0;
+  padding:14px 18px calc(var(--safe-bottom) + 18px); transform:translateY(105%); transition:transform .22s ease;
+  box-shadow:0 -4px 24px rgba(0,0,0,.2); max-height:85vh; overflow-y:auto;
+}
+.sheet.show{transform:translateY(0);}
+.sheet-handle{width:36px; height:4px; background:var(--line); border-radius:2px; margin:0 auto 14px;}
+.sheet h3{margin:0 0 14px; font-size:17px;}
+.sheet h4{margin:18px 0 8px; font-size:12.5px; color:var(--muted); font-weight:700; text-transform:uppercase; letter-spacing:.03em;}
+.sheet h4:first-of-type{margin-top:2px;}
+.field{margin-bottom:12px;}
+.field label{display:block; font-size:12.5px; color:var(--muted); margin-bottom:5px; font-weight:600; text-transform:uppercase; letter-spacing:.03em;}
+.field input{
+  width:100%; padding:11px 12px; border-radius:10px; border:1px solid var(--line); background:var(--panel2);
+  color:var(--text); font-size:16px;
+}
+.colors{display:flex; gap:8px; flex-wrap:wrap; margin-top:2px;}
+.swatch{width:32px; height:32px; border-radius:50%; border:2px solid transparent; flex:0 0 auto; padding:0;}
+.swatch.sel{border-color:var(--text);}
+.btnrow{display:flex; gap:10px; margin-top:16px; flex-wrap:wrap;}
+.btn{
+  flex:1; padding:12px 14px; border-radius:12px; border:none; font-size:15px; font-weight:600; cursor:pointer;
+  background:var(--accent); color:#fff; min-width:110px;
+}
+.btn.secondary{background:var(--panel2); color:var(--text);}
+.btn.danger{background:var(--danger); color:#fff;}
+.btn.ghost{background:none; color:var(--accent); flex:0 0 auto;}
+
+/* segmented control for design options */
+.seg{display:flex; gap:6px; background:var(--panel2); padding:4px; border-radius:12px;}
+.seg button{
+  flex:1; padding:9px 6px; border:none; border-radius:9px; background:none; color:var(--muted);
+  font-size:13px; font-weight:600; display:flex; flex-direction:column; align-items:center; gap:4px;
+}
+.seg button.sel{background:var(--panel); color:var(--text); box-shadow:var(--shadow);}
+.seg button svg{display:block;}
+
+.themegrid{display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-top:4px;}
+.themecard{
+  border:2px solid var(--line); border-radius:12px; padding:10px 8px; background:var(--panel2);
+  display:flex; flex-direction:column; align-items:center; gap:6px; font-size:11.5px; font-weight:600; color:var(--text);
+}
+.themecard.sel{border-color:var(--accent);}
+.themecard .dots{display:flex; gap:3px;}
+.themecard .dot{width:14px; height:14px; border-radius:50%;}
+
+.previewrow{display:flex; align-items:center; gap:12px; margin-bottom:10px;}
+.photoWrap{position:relative; flex:0 0 auto;}
+#photoPreview{
+  width:64px; height:64px; border-radius:50%; background:var(--panel2); display:flex; align-items:center; justify-content:center;
+  font-weight:700; font-size:20px; color:#fff; background-size:cover; background-position:center; border:1px solid var(--line);
+}
+.photoBtns{display:flex; flex-direction:column; gap:6px; flex:1;}
+.photoBtns .btn{padding:8px 10px; font-size:13px;}
+
+.listrow{
+  display:flex; align-items:center; gap:10px; padding:12px 4px; border-bottom:1px solid var(--line);
+}
+.listrow .lname{flex:1; font-size:15px; font-weight:600;}
+.listrow .lmeta{font-size:12px; color:var(--muted);}
+.listrow .rowbtn{padding:8px 10px; font-size:13px; border-radius:8px; border:none; background:var(--panel2); color:var(--text);}
+.divider{height:1px; background:var(--line); margin:14px 0;}
+.smallmuted{font-size:12.5px; color:var(--muted); margin-top:4px;}
+#toast{
+  position:absolute; left:50%; bottom:calc(var(--safe-bottom) + 90px); transform:translateX(-50%) translateY(20px);
+  background:var(--text); color:var(--bg); padding:10px 18px; border-radius:22px; font-size:14px; z-index:80;
+  opacity:0; transition:opacity .2s, transform .2s; pointer-events:none; white-space:nowrap; max-width:88vw; text-overflow:ellipsis; overflow:hidden;
+}
+#toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
+input[type=file]{display:none;}
+
+/* ---- Print / PDF export ---- */
+#printArea{display:none;}
+@media print{
+  body > *:not(#printArea){display:none !important;}
+  #printArea{display:flex !important; align-items:center; justify-content:center; position:static; width:100%;}
+  #printArea svg{max-width:100%; height:auto;}
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="topbar">
+    <button class="iconbtn" id="menuBtn" aria-label="Menu">☰</button>
+    <input id="chartName" maxlength="60" spellcheck="false" autocomplete="off">
+    <button class="iconbtn" id="designBtn" aria-label="Design">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r="1.2" fill="currentColor" stroke="none"/><circle cx="17.5" cy="10.5" r="1.2" fill="currentColor" stroke="none"/><circle cx="8.5" cy="7.5" r="1.2" fill="currentColor" stroke="none"/><circle cx="6.5" cy="12.5" r="1.2" fill="currentColor" stroke="none"/><path d="M12 2a10 10 0 1 0 3.5 19.4c1-.37 1-1.7.1-2.24-.6-.36-.9-1.05-.66-1.7a1.7 1.7 0 0 1 1.6-1.1H18a4 4 0 0 0 4-4c0-5.5-4.5-10-10-10Z"/></svg>
+    </button>
+    <button class="iconbtn" id="undoBtn" aria-label="Undo">
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10h10a5 5 0 0 1 0 10H7"/><path d="M7 5 3 10l4 5"/></svg>
+    </button>
+    <button class="iconbtn" id="shareBtn" aria-label="Share">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M7 8l5-5 5 5"/><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></svg>
+    </button>
+  </div>
+
+  <div id="stage">
+    <div id="canvas">
+      <svg id="edges"></svg>
+    </div>
+    <div id="empty">
+      <h2>No chart yet</h2>
+      <p>Tap the + button to add your first box — that'll be the top of your hierarchy.</p>
+    </div>
+    <button id="fitbtn" aria-label="Fit to screen">⤢</button>
+    <button id="fab" aria-label="Add">+</button>
+  </div>
+</div>
+
+<div id="toast"></div>
+<div id="printArea"></div>
+
+<!-- Node edit sheet -->
+<div class="sheet-backdrop" id="editBackdrop">
+  <div class="sheet" id="editSheet">
+    <div class="sheet-handle"></div>
+    <h3 id="editTitle">Edit box</h3>
+    <div class="previewrow">
+      <div class="photoWrap"><div id="photoPreview">?</div></div>
+      <div class="photoBtns">
+        <button class="btn secondary" id="fChoosePhoto">Choose photo</button>
+        <button class="btn secondary" id="fRemovePhoto">Remove photo</button>
+      </div>
+    </div>
+    <div class="field"><label>Name</label><input id="fName" placeholder="Jane Rivera"></div>
+    <div class="field"><label>Title / Role</label><input id="fTitle" placeholder="VP of Operations"></div>
+    <div class="field">
+      <label>Color</label>
+      <div class="colors" id="colorPicker"></div>
+    </div>
+    <div class="btnrow">
+      <button class="btn" id="fSave">Save</button>
+      <button class="btn secondary" id="fAddChild">+ Add report</button>
+    </div>
+    <div class="btnrow">
+      <button class="btn secondary" id="fAddSibling">+ Add peer</button>
+      <button class="btn danger" id="fDelete">Delete</button>
+    </div>
+    <button class="btn ghost" id="fCancel" style="margin-top:8px;">Cancel</button>
+  </div>
+</div>
+
+<!-- Charts / menu sheet -->
+<div class="sheet-backdrop" id="menuBackdrop">
+  <div class="sheet" id="menuSheet">
+    <div class="sheet-handle"></div>
+    <h3>Your charts</h3>
+    <div id="chartList"></div>
+    <div class="btnrow">
+      <button class="btn" id="newChartBtn">+ New chart</button>
+      <button class="btn secondary" id="relayoutBtn">Re-layout</button>
+    </div>
+    <div class="divider"></div>
+    <div class="btnrow">
+      <button class="btn secondary" id="designOpenBtn">🎨 Design &amp; style</button>
+      <button class="btn secondary" id="exportOpenBtn">⭳ Export &amp; share</button>
+    </div>
+    <div class="btnrow">
+      <button class="btn secondary" id="themeBtn">Toggle light/dark</button>
+    </div>
+    <p class="smallmuted">Charts are stored only on this device. Use Export JSON to back up or send a chart to another phone; Import JSON to bring one in.</p>
+    <button class="btn ghost" id="menuCloseBtn" style="margin-top:6px;">Close</button>
+  </div>
+</div>
+
+<!-- Design sheet: layout, connectors, card style, color theme, font -->
+<div class="sheet-backdrop" id="designBackdrop">
+  <div class="sheet" id="designSheet">
+    <div class="sheet-handle"></div>
+    <h3>Design &amp; style</h3>
+
+    <h4>Layout direction</h4>
+    <div class="seg" id="segLayout">
+      <button data-v="vertical" class="sel">
+        <svg width="26" height="22" viewBox="0 0 26 22"><rect x="8" y="1" width="10" height="6" rx="2" fill="currentColor"/><rect x="1" y="15" width="10" height="6" rx="2" fill="currentColor" opacity=".55"/><rect x="15" y="15" width="10" height="6" rx="2" fill="currentColor" opacity=".55"/></svg>
+        Top-down
+      </button>
+      <button data-v="horizontal">
+        <svg width="26" height="22" viewBox="0 0 26 22"><rect x="1" y="8" width="9" height="6" rx="2" fill="currentColor"/><rect x="16" y="1" width="9" height="6" rx="2" fill="currentColor" opacity=".55"/><rect x="16" y="15" width="9" height="6" rx="2" fill="currentColor" opacity=".55"/></svg>
+        Left-right
+      </button>
+    </div>
+
+    <h4>Connectors</h4>
+    <div class="seg" id="segConnector">
+      <button data-v="curved">
+        <svg width="26" height="18" viewBox="0 0 26 18"><path d="M4 2 C4 9, 22 9, 22 16" stroke="currentColor" stroke-width="2" fill="none"/></svg>
+        Curved
+      </button>
+      <button data-v="elbow" class="sel">
+        <svg width="26" height="18" viewBox="0 0 26 18"><path d="M4 2 V9 H22 V16" stroke="currentColor" stroke-width="2" fill="none"/></svg>
+        Elbow
+      </button>
+    </div>
+
+    <h4>Card style</h4>
+    <div class="seg" id="segCard">
+      <button data-v="modern" class="sel">
+        <svg width="30" height="18" viewBox="0 0 30 18"><rect x="2" y="2" width="26" height="14" rx="5" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+        Modern
+      </button>
+      <button data-v="classic">
+        <svg width="30" height="18" viewBox="0 0 30 18"><rect x="2" y="2" width="26" height="14" rx="1" fill="none" stroke="currentColor" stroke-width="2"/><rect x="2" y="2" width="26" height="4" fill="currentColor"/></svg>
+        Classic
+      </button>
+      <button data-v="minimal">
+        <svg width="30" height="18" viewBox="0 0 30 18"><rect x="2" y="2" width="26" height="14" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+        Minimal
+      </button>
+    </div>
+
+    <h4>Color theme</h4>
+    <div class="themegrid" id="themeGrid"></div>
+
+    <h4>Font</h4>
+    <div class="seg" id="segFont">
+      <button data-v="system" class="sel" style="font-family:-apple-system,sans-serif;">Aa</button>
+      <button data-v="serif" style="font-family:Georgia,serif;">Aa</button>
+      <button data-v="rounded" style="font-family:ui-rounded,sans-serif;">Aa</button>
+      <button data-v="mono" style="font-family:ui-monospace,monospace;">Aa</button>
+    </div>
+
+    <button class="btn" id="designDoneBtn" style="margin-top:18px;">Done</button>
+  </div>
+</div>
+
+<!-- Export sheet -->
+<div class="sheet-backdrop" id="exportBackdrop">
+  <div class="sheet" id="exportSheet">
+    <div class="sheet-handle"></div>
+    <h3>Export &amp; share</h3>
+    <h4>Image</h4>
+    <div class="btnrow">
+      <button class="btn secondary" id="exportPngBtn">PNG</button>
+      <button class="btn secondary" id="exportJpgBtn">JPG</button>
+    </div>
+    <h4>Vector &amp; documents</h4>
+    <div class="btnrow">
+      <button class="btn secondary" id="exportSvgBtn">SVG (vector)</button>
+      <button class="btn secondary" id="exportPdfBtn">PDF</button>
+    </div>
+    <h4>Backup</h4>
+    <div class="btnrow">
+      <button class="btn secondary" id="exportBtn">Export JSON</button>
+      <button class="btn secondary" id="importBtn">Import JSON</button>
+    </div>
+    <p class="smallmuted">PDF opens the print sheet — choose "Save to Files" or "Save as PDF" to keep a crisp vector copy. SVG is a scalable vector file you can open or edit elsewhere.</p>
+    <button class="btn ghost" id="exportCloseBtn" style="margin-top:6px;">Close</button>
+  </div>
+</div>
+
+<input type="file" id="importFile" accept="application/json">
+<input type="file" id="photoFile" accept="image/*">
+
+<script src="app.js"></script>
+</body>
+</html>
