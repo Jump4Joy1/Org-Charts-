@@ -1,4 +1,4 @@
-var CACHE = 'orgchart-v2';
+var CACHE = 'orgchart-v3';
 var ASSETS = [
   './',
   './index.html',
@@ -22,8 +22,38 @@ self.addEventListener('activate', function (e) {
   self.clients.claim();
 });
 
+// Network-first for the app itself (HTML/JS/manifest) so a new version shows up
+// on the very next launch instead of one launch later; cache is the offline
+// fallback. Everything else stays cache-first for speed.
+function isAppShell(url) {
+  return /\/$|\.html$|\.js$|\.webmanifest$/.test(url.pathname);
+}
+
 self.addEventListener('fetch', function (e) {
   if (e.request.method !== 'GET') return;
+  var url;
+  try { url = new URL(e.request.url); } catch (err) { return; }
+  if (url.origin !== self.location.origin) return;
+
+  if (isAppShell(url)) {
+    e.respondWith(
+      fetch(e.request)
+        .then(function (res) {
+          if (res && res.status === 200) {
+            var copy = res.clone();
+            caches.open(CACHE).then(function (c) { c.put(e.request, copy); });
+          }
+          return res;
+        })
+        .catch(function () {
+          return caches.match(e.request).then(function (cached) {
+            return cached || caches.match('./index.html');
+          });
+        })
+    );
+    return;
+  }
+
   e.respondWith(
     caches.match(e.request).then(function (cached) {
       var network = fetch(e.request)

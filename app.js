@@ -8,6 +8,7 @@
   var NODE_H_APPROX = 96;
   var SIB_GAP = 30;
   var LEVEL_GAP = 100;
+  var DRAG_THRESHOLD = 8; // px of finger movement before a touch counts as a drag
   var STORE_KEY = 'orgchart.v2';
   var OLD_STORE_KEY = 'orgchart.v1';
 
@@ -132,19 +133,54 @@
     return { id: id, name: name || 'Untitled chart', nodes: {}, edges: {}, notes: {}, background: defaultBackground(), font: 'system', updatedAt: Date.now() };
   }
 
+  var redoStack = [];
+  var storageWarned = false;
   function saveState() {
     getActiveChart().updatedAt = Date.now();
-    localStorage.setItem(STORE_KEY, JSON.stringify(state));
+    try {
+      localStorage.setItem(STORE_KEY, JSON.stringify(state));
+      storageWarned = false;
+      return true;
+    } catch (e) {
+      // Storage is full (photos are the usual culprit). Keep the in-memory
+      // chart working rather than letting the exception kill the interaction.
+      if (!storageWarned) {
+        storageWarned = true;
+        setTimeout(function () {
+          alert('This device is out of storage space for OrgChart, so your latest changes could NOT be saved.\n\nYour chart still works right now, but changes will be lost if you close the app.\n\nTo free space: export this chart as JSON to back it up, then delete charts you no longer need, or remove some box photos (photos take the most space).');
+        }, 30);
+      }
+      toast('⚠️ Not saved — storage full');
+      return false;
+    }
   }
 
   function getActiveChart() { return state.charts[state.activeId]; }
 
   function snapshot() { return JSON.stringify(state.charts[state.activeId]); }
-  function pushUndo() { undoStack.push(snapshot()); if (undoStack.length > 25) undoStack.shift(); }
+  function pushUndo() {
+    undoStack.push(snapshot());
+    if (undoStack.length > 40) undoStack.shift();
+    redoStack.length = 0; // a fresh edit invalidates the redo trail
+  }
+  // Commit an undo entry captured before an interactive drag began.
+  function commitUndo(snap) {
+    if (!snap) return;
+    undoStack.push(snap);
+    if (undoStack.length > 40) undoStack.shift();
+    redoStack.length = 0;
+  }
   function undo() {
     if (!undoStack.length) { toast('Nothing to undo'); return; }
+    redoStack.push(snapshot());
     state.charts[state.activeId] = JSON.parse(undoStack.pop());
     saveState(); render(); applyChartVars(); toast('Undone');
+  }
+  function redo() {
+    if (!redoStack.length) { toast('Nothing to redo'); return; }
+    undoStack.push(snapshot());
+    state.charts[state.activeId] = JSON.parse(redoStack.pop());
+    saveState(); render(); applyChartVars(); toast('Redone');
   }
 
   // ---------------------------------------------------------------------
@@ -160,6 +196,43 @@
       case 'cross': return 'repeating-linear-gradient(45deg, ' + ink + '30 0 2px, transparent 2px 10px), repeating-linear-gradient(-45deg, ' + ink + '30 0 2px, transparent 2px 10px), ' + base;
       default: return base;
     }
+  }
+
+  // ---------------------------------------------------------------------
+  // Contrast helpers — keep box text legible on any fill the user picks
+  // ---------------------------------------------------------------------
+  function hexToRgb(hex) {
+    if (!hex || hex.charAt(0) !== '#') return null;
+    var h = hex.slice(1);
+    if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+    if (h.length !== 6) return null;
+    var v = parseInt(h, 16);
+    if (isNaN(v)) return null;
+    return { r: (v >> 16) & 255, g: (v >> 8) & 255, b: v & 255 };
+  }
+  function luminance(hex) {
+    var c = hexToRgb(hex);
+    if (!c) return null;
+    var f = function (x) { x /= 255; return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); };
+    return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b);
+  }
+  // The colour actually sitting behind a box's text, or null when the box
+  // just uses the theme's card colour.
+  function effectiveFillColor(n) {
+    var fill = n.fill || defaultFill();
+    if (fill.type === 'gradient') return fill.color || fill.color2 || null;
+    if (fill.type === 'texture') return null; // texture keeps the panel base behind it
+    return fill.color || null;
+  }
+  function textColorsFor(n) {
+    if (n.textColor) return { name: n.textColor, title: n.textColor, titleOpacity: 0.75 };
+    var bg = effectiveFillColor(n);
+    var lum = bg === null ? null : luminance(bg);
+    if (lum === null) return { name: '', title: '', titleOpacity: 1 }; // inherit theme colours
+    var light = lum < 0.5;
+    return light
+      ? { name: '#ffffff', title: 'rgba(255,255,255,.82)', titleOpacity: 1 }
+      : { name: '#16202b', title: 'rgba(22,32,43,.72)', titleOpacity: 1 };
   }
 
   // ---------------------------------------------------------------------
@@ -246,7 +319,9 @@
     el.style.borderWidth = (border.width || 1) + 'px';
     el.style.borderStyle = border.dash === 'dashed' ? 'dashed' : (border.dash === 'dotted' ? 'dotted' : 'solid');
     el.style.fontFamily = n.font ? FONT_STACKS[n.font] : '';
-    el.querySelector('.nname').style.color = n.textColor || '';
+    var tc = textColorsFor(n);
+    el.querySelector('.nname').style.color = tc.name;
+    el.querySelector('.ntitle').style.color = tc.title;
   }
 
   function render() {
@@ -327,6 +402,43 @@
     return { x: note.x || 0, y: note.y || 0 };
   }
 
+  // Endpoints for a note's leader line, or null for free-floating notes.
+  function noteTether(noteId) {
+    var chart = getActiveChart();
+    var note = chart.notes[noteId];
+    if (!note || !note.attach || note.attach.type === 'free') return null;
+    var pos = noteAnchor(note);
+    var el = noteEls[noteId];
+    var nw = (el && el.offsetWidth) || 132, nh = (el && el.offsetHeight) || 70;
+    var noteCx = pos.x + nw / 2, noteCy = pos.y + nh / 2;
+    var target = null;
+    if (note.attach.type === 'node') {
+      var n = chart.nodes[note.attach.id];
+      if (!n) return null;
+      var h = (nodeEls[note.attach.id] && nodeEls[note.attach.id].offsetHeight) || NODE_H_APPROX;
+      var a = anchorOnNode(n, h, noteCx, noteCy);
+      target = { x: a.x, y: a.y };
+    } else if (note.attach.type === 'edge') {
+      var e = chart.edges[note.attach.id];
+      if (!e) return null;
+      var na = chart.nodes[e.from], nb = chart.nodes[e.to];
+      if (!na || !nb) return null;
+      var ha = (nodeEls[e.from] && nodeEls[e.from].offsetHeight) || NODE_H_APPROX;
+      var hb = (nodeEls[e.to] && nodeEls[e.to].offsetHeight) || NODE_H_APPROX;
+      var rb = nodeRect(nb, hb), ra = nodeRect(na, ha);
+      var pA = anchorOnNode(na, ha, rb.cx, rb.cy);
+      var pB = anchorOnNode(nb, hb, ra.cx, ra.cy);
+      var mid = midOfPath(pA, pB, e.style || 'elbow');
+      target = { x: mid.x, y: mid.y };
+    }
+    if (!target) return null;
+    // Start the line at the note edge nearest the target, not its centre.
+    var dx = target.x - noteCx, dy = target.y - noteCy;
+    var sx = Math.abs(dx) < 1e-6 ? 1e-6 : dx, sy = Math.abs(dy) < 1e-6 ? 1e-6 : dy;
+    var s = Math.min((nw / 2) / Math.abs(sx), (nh / 2) / Math.abs(sy));
+    return { x1: noteCx + dx * s, y1: noteCy + dy * s, x2: target.x, y2: target.y };
+  }
+
   function renderPositionsOnly() {
     var chart = getActiveChart();
     Object.keys(nodeEls).forEach(function (id) {
@@ -374,6 +486,13 @@
         parts.push('<rect class="edge-label-bg" x="' + (mid.x - w / 2) + '" y="' + (mid.y - 10) + '" width="' + w + '" height="18" rx="4" fill="var(--panel)" stroke="var(--line)"/>');
         parts.push('<text class="edge-label" x="' + mid.x + '" y="' + (mid.y + 1) + '" font-size="11" fill="var(--text)">' + escapeHtml(e.label) + '</text>');
       }
+    });
+    // Faint leader lines tethering each attached note to its box / connector,
+    // so it stays obvious what a note is annotating once it's been moved.
+    Object.keys(chart.notes).forEach(function (nid) {
+      var tether = noteTether(nid);
+      if (!tether) return;
+      parts.push('<line class="note-tether" x1="' + tether.x1 + '" y1="' + tether.y1 + '" x2="' + tether.x2 + '" y2="' + tether.y2 + '"/>');
     });
     edgesSvg.innerHTML = (defs.length ? '<defs>' + defs.join('') + '</defs>' : '') + parts.join('');
     edgesSvg.querySelectorAll('.edge-hit').forEach(function (p) {
@@ -457,7 +576,7 @@
       el.removeEventListener('pointerup', up);
       el.removeEventListener('pointercancel', up);
       el.classList.remove('dragging');
-      if (moved) { undoStack.push(preSnap); saveState(); renderPositionsOnly(); }
+      if (moved) { commitUndo(preSnap); saveState(); renderPositionsOnly(); }
       else openEditSheet(id);
     }
     el.addEventListener('pointermove', move);
@@ -471,12 +590,15 @@
     var nodeEl = handle.closest('.node');
     var sourceId = nodeEl.dataset.id;
     try { handle.setPointerCapture(e.pointerId); } catch (err) {}
+    var startX = e.clientX, startY = e.clientY, dragged = false;
     var tempPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     tempPath.setAttribute('class', 'temp-edge');
     edgesSvg.appendChild(tempPath);
     showHint('Drag to another box to connect, or release on empty space to create one');
 
     function move(ev) {
+      if (!dragged && (Math.abs(ev.clientX - startX) > DRAG_THRESHOLD || Math.abs(ev.clientY - startY) > DRAG_THRESHOLD)) dragged = true;
+      if (!dragged) return;
       var chart = getActiveChart();
       var n = chart.nodes[sourceId];
       var pt = clientToCanvas(ev.clientX, ev.clientY);
@@ -490,17 +612,23 @@
       handle.removeEventListener('pointercancel', up);
       tempPath.remove();
       hideHint();
+      // A tap without a real drag is almost always accidental — the handles are
+      // small touch targets. Do nothing rather than spawning a stray box.
+      if (!dragged) return;
       var hits = document.elementsFromPoint(ev.clientX, ev.clientY);
       var targetEl = null;
       for (var i = 0; i < hits.length; i++) {
         var hEl = hits[i].closest && hits[i].closest('.node');
         if (hEl && hEl !== nodeEl) { targetEl = hEl; break; }
       }
-      pushUndo();
       if (targetEl) {
-        addEdge(sourceId, targetEl.dataset.id, true);
+        var preSnap = snapshot();
+        var made = addEdge(sourceId, targetEl.dataset.id, true);
+        if (!made) { toast('Already connected'); return; }
+        commitUndo(preSnap);
         saveState(); render();
       } else {
+        pushUndo();
         var pt = clientToCanvas(ev.clientX, ev.clientY);
         var newId = createNodeAt(pt.x - NODE_W / 2, pt.y - NODE_H_APPROX / 2, true);
         addEdge(sourceId, newId, true);
@@ -541,7 +669,7 @@
       el.removeEventListener('pointerup', up);
       el.removeEventListener('pointercancel', up);
       el.classList.remove('dragging');
-      if (moved) { undoStack.push(preSnap); saveState(); }
+      if (moved) { commitUndo(preSnap); saveState(); }
       else openNoteSheet(id);
     }
     el.addEventListener('pointermove', move);
@@ -722,9 +850,22 @@
   // ---------------------------------------------------------------------
   // Reusable color / texture pickers
   // ---------------------------------------------------------------------
-  function buildColorRow(container, value, onChange) {
+  function buildColorRow(container, value, onChange, allowDefault) {
     container.innerHTML = '';
     var isCustom = value && COLOR_SWATCHES.indexOf(value) === -1;
+    if (allowDefault) {
+      var none = document.createElement('button');
+      none.type = 'button';
+      none.className = 'swatch noneswatch' + (!value ? ' sel' : '');
+      none.title = 'Default (theme card colour)';
+      none.addEventListener('click', function () {
+        container.querySelectorAll('.swatch,.customswatch').forEach(function (s) { s.classList.remove('sel'); });
+        none.classList.add('sel');
+        container.dataset.value = '';
+        onChange && onChange('');
+      });
+      container.appendChild(none);
+    }
     COLOR_SWATCHES.forEach(function (c) {
       var b = document.createElement('button');
       b.type = 'button';
@@ -751,7 +892,7 @@
     });
     custom.appendChild(inp);
     container.appendChild(custom);
-    container.dataset.value = value || COLOR_SWATCHES[0];
+    container.dataset.value = value || (allowDefault ? '' : COLOR_SWATCHES[0]);
   }
 
   function buildTextureGrid(container, value, inkColor, onChange) {
@@ -836,16 +977,16 @@
     buildColorRow(colorPicker, n.color || COLOR_SWATCHES[0]);
     var fill = n.fill || defaultFill();
     wireSeg(segFillType, fill.type, updateFillPickerVisibility);
-    buildColorRow(fillColorPicker, fill.color || n.color || COLOR_SWATCHES[0]);
+    buildColorRow(fillColorPicker, fill.color || '', null, true);
     buildColorRow(fillColor2Picker, fill.color2 || '#c3d1ea');
     buildTextureGrid(fillTextureGrid, fill.texture || 'dots', fill.color || n.color);
     updateFillPickerVisibility();
     var border = n.border || defaultBorder();
-    buildColorRow(borderColorPicker, border.color || '#dbe0e6');
+    buildColorRow(borderColorPicker, border.color || '', null, true);
     wireSeg(segBorderWidth, String(border.width || 1));
     wireSeg(segBorderDash, border.dash || 'solid');
     populateFontSelect(fFont, n.font);
-    buildColorRow(textColorPicker, n.textColor || '#1c2530');
+    buildColorRow(textColorPicker, n.textColor || '', null, true);
     editBackdrop.classList.add('show');
     editSheet.classList.add('show');
     if (focusEmpty) setTimeout(function () { fName.focus(); }, 260);
@@ -869,6 +1010,24 @@
     saveState();
     closeEditSheet();
     render();
+  });
+  $('fDuplicate').addEventListener('click', function () {
+    if (!editingId) return;
+    var chart = getActiveChart();
+    var src = chart.nodes[editingId];
+    if (!src) return;
+    pushUndo();
+    var copy = JSON.parse(JSON.stringify(src));
+    copy.id = uid();
+    copy.x = src.x + NODE_W + SIB_GAP;
+    copy.y = src.y;
+    copy.order = Date.now();
+    chart.nodes[copy.id] = copy;
+    saveState();
+    closeEditSheet();
+    render();
+    openEditSheet(copy.id, true);
+    toast('Duplicated — styling copied');
   });
   $('fAddNote').addEventListener('click', function () { if (editingId) { var id = editingId; closeEditSheet(); addNoteAttached({ type: 'node', id: id }); } });
   $('fDelete').addEventListener('click', function () { if (editingId) deleteNode(editingId); });
@@ -1018,6 +1177,7 @@
   chartNameInput.addEventListener('change', function () { getActiveChart().name = chartNameInput.value.trim() || 'Untitled chart'; saveState(); });
   chartNameInput.addEventListener('keydown', function (e) { if (e.key === 'Enter') chartNameInput.blur(); });
   $('undoBtn').addEventListener('click', undo);
+  $('redoBtn').addEventListener('click', redo);
   $('fitbtn').addEventListener('click', function () { fitToScreen(); });
   $('fab').addEventListener('click', function () { addNode(); });
   $('noteFab').addEventListener('click', function () { addNoteAttached({ type: 'free' }); });
@@ -1361,25 +1521,39 @@
         parts.push('<circle cx="' + cx + '" cy="' + avatarCy + '" r="22" fill="' + accent + '"/>');
         parts.push('<text x="' + cx + '" y="' + (avatarCy + 5) + '" font-size="14" font-weight="700" fill="#fff" text-anchor="middle">' + escapeHtml(initials(n.name)) + '</text>');
       }
-      var nameColor = n.textColor || textColorDefault;
+      var tcx = textColorsFor(n);
+      var nameColor = tcx.name || textColorDefault;
+      var titleColor = tcx.title || mutedColor;
       var nameFont = (n.font ? FONT_STACKS[n.font] : fontFamily).replace(/"/g, "'");
-      parts.push('<text x="' + cx + '" y="' + (y + 64) + '" font-family="' + nameFont + '" font-size="13.5" font-weight="700" fill="' + nameColor + '" text-anchor="middle">' + escapeHtml((n.name || 'Unnamed').slice(0, 24)) + '</text>');
-      if (n.title) parts.push('<text x="' + cx + '" y="' + (y + 82) + '" font-family="' + nameFont + '" font-size="11.5" fill="' + mutedColor + '" text-anchor="middle">' + escapeHtml(n.title.slice(0, 28)) + '</text>');
+      // Wrap rather than truncate, so the exported chart matches the screen.
+      var nameLines = wrapSvgText(n.name || 'Unnamed', NODE_W - 20, 13.5, true);
+      var titleLines = n.title ? wrapSvgText(n.title, NODE_W - 20, 11.5, false) : [];
+      var textTop = y + 64;
+      nameLines.forEach(function (line, li) {
+        parts.push('<text x="' + cx + '" y="' + (textTop + li * 16) + '" font-family="' + nameFont + '" font-size="13.5" font-weight="700" fill="' + nameColor + '" text-anchor="middle">' + escapeHtml(line) + '</text>');
+      });
+      var titleTop = textTop + nameLines.length * 16 + 2;
+      titleLines.forEach(function (line, li) {
+        parts.push('<text x="' + cx + '" y="' + (titleTop + li * 14) + '" font-family="' + nameFont + '" font-size="11.5" fill="' + titleColor + '" text-anchor="middle">' + escapeHtml(line) + '</text>');
+      });
+    });
+
+    noteIds.forEach(function (id) {
+      var t = noteTether(id);
+      if (t) {
+        parts.push('<line x1="' + (t.x1 - minX + pad) + '" y1="' + (t.y1 - minY + pad) + '" x2="' + (t.x2 - minX + pad) + '" y2="' + (t.y2 - minY + pad) + '" stroke="' + mutedColor + '" stroke-width="1.5" stroke-dasharray="3 4" opacity=".6"/>');
+      }
     });
 
     noteIds.forEach(function (id) {
       var note = chart.notes[id];
       var pos = noteAnchor(note);
       var p = toDoc(pos.x, pos.y);
-      var w = 132, h2 = Math.max(70, 18 + Math.ceil((note.text || '').length / 18) * 14);
+      var w = 132;
+      var lines = wrapSvgText(note.text || '', w - 20, 11.5, false);
+      var h2 = Math.max(70, 16 + lines.length * 14);
       parts.push('<rect x="' + p.x + '" y="' + p.y + '" width="' + w + '" height="' + h2 + '" rx="8" fill="' + (note.color || '#ffe58a') + '" stroke="rgba(0,0,0,.15)"/>');
-      var words = (note.text || '').split(/\s+/);
-      var lines = [], cur = '';
-      words.forEach(function (word) {
-        if ((cur + ' ' + word).trim().length > 18) { lines.push(cur.trim()); cur = word; } else cur += ' ' + word;
-      });
-      if (cur.trim()) lines.push(cur.trim());
-      lines.slice(0, 6).forEach(function (line, li) {
+      lines.forEach(function (line, li) {
         parts.push('<text x="' + (p.x + 10) + '" y="' + (p.y + 20 + li * 14) + '" font-size="11.5" fill="#3a3420">' + escapeHtml(line) + '</text>');
       });
     });
@@ -1387,6 +1561,27 @@
     if (defs.length) parts.push('<defs>' + defs.join('') + '</defs>');
     parts.push('</svg>');
     return { svg: parts.join(''), width: W, height: H };
+  }
+
+  // Greedy word wrap for SVG text (SVG has no automatic wrapping).
+  // Long single words are hard-split so they can never overflow the box.
+  function wrapSvgText(text, maxWidth, fontSize, bold) {
+    var avgChar = fontSize * (bold ? 0.58 : 0.52);
+    var maxChars = Math.max(6, Math.floor(maxWidth / avgChar));
+    var words = String(text || '').trim().split(/\s+/).filter(Boolean);
+    var lines = [], cur = '';
+    words.forEach(function (w) {
+      while (w.length > maxChars) {
+        if (cur) { lines.push(cur); cur = ''; }
+        lines.push(w.slice(0, maxChars - 1) + '-');
+        w = w.slice(maxChars - 1);
+      }
+      var candidate = cur ? cur + ' ' + w : w;
+      if (candidate.length > maxChars) { if (cur) lines.push(cur); cur = w; }
+      else cur = candidate;
+    });
+    if (cur) lines.push(cur);
+    return lines.length ? lines : [''];
   }
 
   function svgPatternDef(id, pattern, ink, base) {

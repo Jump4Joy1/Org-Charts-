@@ -83,6 +83,7 @@ svg#edges{position:absolute; left:0; top:0; overflow:visible;}
 .edge-label-bg{pointer-events:none;}
 .edge-label{pointer-events:none; text-anchor:middle; dominant-baseline:middle;}
 .temp-edge{fill:none; stroke:var(--accent); stroke-width:2.5; stroke-dasharray:6 5; pointer-events:none;}
+.note-tether{stroke:var(--muted); stroke-width:1.5; stroke-dasharray:3 4; opacity:.6; pointer-events:none;}
 
 .node{
   position:absolute; width:168px; touch-action:none; user-select:none;
@@ -101,15 +102,25 @@ svg#edges{position:absolute; left:0; top:0; overflow:visible;}
 .node .nname{font-size:14.5px; font-weight:600; line-height:1.25; word-break:break-word;}
 .node .ntitle{font-size:12px; color:var(--muted); line-height:1.2; word-break:break-word;}
 
+/* Connector handles: visually light so big charts stay readable, but with a
+   generous invisible touch target (::before) so they're still easy to grab. */
 .handle{
-  position:absolute; width:20px; height:20px; border-radius:50%; background:var(--panel); border:2px solid var(--accent);
+  position:absolute; width:13px; height:13px; border-radius:50%;
+  background:var(--panel); border:2px solid var(--accent); opacity:.5;
   display:flex; align-items:center; justify-content:center; z-index:8; touch-action:none;
+  transition:opacity .15s, transform .15s;
 }
-.handle::after{content:'';width:7px;height:7px;border-radius:50%;background:var(--accent);}
-.handle.n{left:50%; top:-10px; transform:translateX(-50%);}
-.handle.s{left:50%; bottom:-10px; transform:translateX(-50%);}
-.handle.e{right:-10px; top:50%; transform:translateY(-50%);}
-.handle.w{left:-10px; top:50%; transform:translateY(-50%);}
+.handle::before{
+  content:''; position:absolute; left:50%; top:50%;
+  width:40px; height:40px; transform:translate(-50%,-50%); border-radius:50%;
+}
+.handle:active{opacity:1; transform:scale(1.35);}
+.node:active .handle, .node.dragging .handle{opacity:.95;}
+.handle.n{left:50%; top:-7px; margin-left:-6.5px;}
+.handle.s{left:50%; bottom:-7px; margin-left:-6.5px;}
+.handle.e{right:-7px; top:50%; margin-top:-6.5px;}
+.handle.w{left:-7px; top:50%; margin-top:-6.5px;}
+.handle.n:active,.handle.s:active,.handle.e:active,.handle.w:active{transform:scale(1.35);}
 
 .note{
   position:absolute; width:132px; min-height:70px; border-radius:8px; padding:10px 11px; font-size:12.5px;
@@ -176,6 +187,14 @@ svg#edges{position:absolute; left:0; top:0; overflow:visible;}
 .colors{display:flex; gap:8px; flex-wrap:wrap; margin-top:2px; align-items:center;}
 .swatch{width:30px; height:30px; border-radius:50%; border:2px solid transparent; flex:0 0 auto; padding:0;}
 .swatch.sel{border-color:var(--text);}
+.noneswatch{
+  background:var(--panel2); border:2px dashed var(--line); position:relative;
+}
+.noneswatch::after{
+  content:''; position:absolute; left:3px; right:3px; top:50%; height:2px;
+  background:var(--danger); transform:rotate(-45deg); border-radius:2px;
+}
+.noneswatch.sel{border-style:solid; border-color:var(--text);}
 .customswatch{width:30px; height:30px; border-radius:50%; border:2px dashed var(--line); flex:0 0 auto; padding:0; position:relative; overflow:hidden; background:conic-gradient(red,yellow,lime,cyan,blue,magenta,red);}
 .customswatch.sel{border-style:solid; border-color:var(--text);}
 .customswatch input{position:absolute; inset:-6px; opacity:0; cursor:pointer; width:150%; height:150%;}
@@ -255,6 +274,9 @@ input[type=file]{display:none;}
     <button class="iconbtn" id="undoBtn" aria-label="Undo">
       <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10h10a5 5 0 0 1 0 10H7"/><path d="M7 5 3 10l4 5"/></svg>
     </button>
+    <button class="iconbtn" id="redoBtn" aria-label="Redo">
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10H11a5 5 0 0 0 0 10h6"/><path d="M17 5l4 5-4 5"/></svg>
+    </button>
     <button class="iconbtn" id="shareBtn" aria-label="Share">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M7 8l5-5 5 5"/><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></svg>
     </button>
@@ -333,12 +355,13 @@ input[type=file]{display:none;}
 
     <div class="btnrow">
       <button class="btn" id="fSave">Save</button>
-      <button class="btn secondary" id="fAddNote">🗒 Add note</button>
+      <button class="btn secondary" id="fDuplicate">⧉ Duplicate</button>
     </div>
     <div class="btnrow">
+      <button class="btn secondary" id="fAddNote">🗒 Add note</button>
       <button class="btn danger" id="fDelete">Delete box</button>
-      <button class="btn ghost" id="fCancel">Cancel</button>
     </div>
+    <button class="btn ghost" id="fCancel" style="margin-top:8px;">Cancel</button>
   </div>
 </div>
 
