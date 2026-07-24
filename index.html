@@ -43,6 +43,11 @@
   --line:#dbe0e6; --danger:#d64545;
   --shadow: 0 2px 10px rgba(20,26,34,.08);
 }
+:root[data-theme="dim"]{
+  --bg:#2f353c; --panel:#383e46; --panel2:#414850; --text:#eef1f4; --muted:#a8b0b9;
+  --line:#4c545e; --danger:#f0665f;
+  --shadow: 0 2px 14px rgba(0,0,0,.3);
+}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
 html,body{height:100%;overscroll-behavior:none;}
 body{
@@ -419,9 +424,6 @@ input[type=file]{display:none;}
       <button class="btn secondary" id="designOpenBtn">🎨 Chart style</button>
       <button class="btn secondary" id="exportOpenBtn">⭳ Export &amp; share</button>
     </div>
-    <div class="btnrow">
-      <button class="btn secondary" id="themeBtn">Toggle light/dark</button>
-    </div>
     <p class="smallmuted">Charts are stored only on this device. Use Export JSON to back up or send a chart to another phone; Import JSON to bring one in.</p>
     <button class="btn ghost" id="menuCloseBtn" style="margin-top:6px;">Close</button>
   </div>
@@ -449,9 +451,16 @@ input[type=file]{display:none;}
     <h4>Quick presets</h4>
     <div class="themegrid" id="themeGrid"></div>
 
+    <h4>App appearance</h4>
+    <div class="seg" id="segAppearance">
+      <button data-v="auto">Auto</button>
+      <button data-v="light">Light</button>
+      <button data-v="dim">Dim</button>
+      <button data-v="dark">Dark</button>
+    </div>
+
     <div class="btnrow">
       <button class="btn secondary" id="relayoutBtn2">Tidy layout</button>
-      <button class="btn secondary" id="themeBtn2">Toggle light/dark</button>
     </div>
     <button class="btn" id="designDoneBtn" style="margin-top:14px;">Done</button>
   </div>

@@ -1103,16 +1103,23 @@
   $('relayoutBtn').addEventListener('click', function () { pushUndo(); tidyLayout(); saveState(); closeMenu(); render(); fitToScreen(); toast('Tidied up'); });
   $('relayoutBtn2').addEventListener('click', function () { pushUndo(); tidyLayout(); saveState(); render(); fitToScreen(); toast('Tidied up'); });
 
-  function toggleTheme() {
-    var root = document.documentElement;
-    var cur = root.getAttribute('data-theme');
-    var next = cur === 'dark' ? 'light' : (cur === 'light' ? null : 'dark');
-    if (next) root.setAttribute('data-theme', next); else root.removeAttribute('data-theme');
-    localStorage.setItem('orgchart.theme', next || '');
+  var APPEARANCE_PALETTES = {
+    light: { bg: '#f4f6f8', panel: '#ffffff', panel2: '#eef1f4', text: '#1c2530', muted: '#6b7684', line: '#dbe0e6' },
+    dim: { bg: '#2f353c', panel: '#383e46', panel2: '#414850', text: '#eef1f4', muted: '#a8b0b9', line: '#4c545e' },
+    dark: { bg: '#12161c', panel: '#1b2129', panel2: '#232a33', text: '#eef1f5', muted: '#93a0b0', line: '#2c3541' }
+  };
+  function getAppearance() { return localStorage.getItem('orgchart.theme') || 'auto'; }
+  function resolvedAppearance() {
+    var v = getAppearance();
+    if (v !== 'auto') return v;
+    return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   }
-  $('themeBtn').addEventListener('click', toggleTheme);
-  $('themeBtn2').addEventListener('click', toggleTheme);
-  (function initTheme() { var t = localStorage.getItem('orgchart.theme'); if (t) document.documentElement.setAttribute('data-theme', t); })();
+  function setAppearance(v) {
+    var root = document.documentElement;
+    if (v === 'auto') root.removeAttribute('data-theme'); else root.setAttribute('data-theme', v);
+    localStorage.setItem('orgchart.theme', v === 'auto' ? '' : v);
+  }
+  (function initTheme() { var t = getAppearance(); if (t !== 'auto') document.documentElement.setAttribute('data-theme', t); })();
 
   // ---------------------------------------------------------------------
   // Chart design sheet (background, default font, presets, tidy)
@@ -1173,6 +1180,7 @@
     updateBgPickerVisibility();
     populateFontSelect(chartFontSel, chart.font);
     buildThemeGrid();
+    wireSeg($('segAppearance'), getAppearance(), setAppearance);
     designBackdrop.classList.add('show');
     designSheet.classList.add('show');
   }
@@ -1253,14 +1261,13 @@
     var nodeIds = Object.keys(chart.nodes);
     var noteIds = Object.keys(chart.notes);
     if (!nodeIds.length && !noteIds.length) return null;
-    var isDark = matchMedia('(prefers-color-scheme: dark)').matches;
-    var dtRoot = document.documentElement.getAttribute('data-theme');
-    if (dtRoot) isDark = dtRoot === 'dark';
-    var panelBg = isDark ? '#1b2129' : '#ffffff';
-    var panelLine = isDark ? '#2c3541' : '#dbe0e6';
-    var textColorDefault = isDark ? '#eef1f5' : '#1c2530';
-    var mutedColor = isDark ? '#93a0b0' : '#6b7684';
-    var pageBg = isDark ? '#12161c' : '#ffffff';
+    var pal = APPEARANCE_PALETTES[resolvedAppearance()] || APPEARANCE_PALETTES.light;
+    var isDark = resolvedAppearance() !== 'light';
+    var panelBg = pal.panel;
+    var panelLine = pal.line;
+    var textColorDefault = pal.text;
+    var mutedColor = pal.muted;
+    var pageBg = pal.bg;
 
     var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     nodeIds.forEach(function (id) {
