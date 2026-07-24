@@ -70,44 +70,48 @@ body{
 .iconbtn:active{background:var(--line);}
 
 /* ---- Stage ---- */
-#stage{flex:1; position:relative; overflow:hidden; background:
-  radial-gradient(var(--line) 1px, transparent 1px) 0 0/22px 22px, var(--bg);
-}
+#stage{flex:1; position:relative; overflow:hidden; background:var(--stage-bg, var(--bg));}
 #canvas{position:absolute; left:0; top:0; transform-origin:0 0; will-change:transform; font-family:var(--chart-font);}
-svg#edges{position:absolute; left:0; top:0; overflow:visible; pointer-events:none;}
-.edge{fill:none; stroke:var(--accent); stroke-width:2; opacity:.55;}
+svg#edges{position:absolute; left:0; top:0; overflow:visible;}
+.edge-hit{fill:none; stroke:transparent; stroke-width:22px; cursor:pointer;}
+.edge-line{fill:none; pointer-events:none;}
+.edge-label-bg{pointer-events:none;}
+.edge-label{pointer-events:none; text-anchor:middle; dominant-baseline:middle;}
+.temp-edge{fill:none; stroke:var(--accent); stroke-width:2.5; stroke-dasharray:6 5; pointer-events:none;}
 
 .node{
   position:absolute; width:168px; touch-action:none; user-select:none;
-  background:var(--panel); border:1px solid var(--line); border-radius:14px; box-shadow:var(--shadow);
+  border:1px solid var(--line); box-shadow:var(--shadow); border-radius:14px;
   padding:10px 12px; display:flex; flex-direction:column; align-items:center; text-align:center; gap:4px;
-  transition:box-shadow .12s, transform .12s, border-radius .15s;
+  transition:box-shadow .12s, transform .12s;
 }
 .node.dragging{box-shadow:0 10px 26px rgba(0,0,0,.25); z-index:50; transform:scale(1.03);}
-.node.dragover{outline:3px solid var(--accent); outline-offset:2px;}
+.node[data-shape="rect"]{border-radius:4px;}
+.node[data-shape="pill"]{border-radius:999px;}
+.node[data-shape="circle"]{border-radius:50%; justify-content:center; overflow:hidden;}
 .node .avatar{
   width:44px; height:44px; border-radius:50%; display:flex; align-items:center; justify-content:center;
   color:#fff; font-weight:700; font-size:15px; margin-bottom:2px; flex:0 0 auto; background-size:cover; background-position:center;
-  transition:background-color .15s, border-color .15s;
 }
 .node .nname{font-size:14.5px; font-weight:600; line-height:1.25; word-break:break-word;}
 .node .ntitle{font-size:12px; color:var(--muted); line-height:1.2; word-break:break-word;}
-.node .addchild{
-  position:absolute; left:50%; bottom:-14px; transform:translateX(-50%);
-  width:28px; height:28px; border-radius:50%; background:var(--accent); color:#fff; border:2px solid var(--panel);
-  font-size:17px; line-height:1; display:flex; align-items:center; justify-content:center; box-shadow:var(--shadow);
+
+.handle{
+  position:absolute; width:20px; height:20px; border-radius:50%; background:var(--panel); border:2px solid var(--accent);
+  display:flex; align-items:center; justify-content:center; z-index:8; touch-action:none;
 }
+.handle::after{content:'';width:7px;height:7px;border-radius:50%;background:var(--accent);}
+.handle.n{left:50%; top:-10px; transform:translateX(-50%);}
+.handle.s{left:50%; bottom:-10px; transform:translateX(-50%);}
+.handle.e{right:-10px; top:50%; transform:translateY(-50%);}
+.handle.w{left:-10px; top:50%; transform:translateY(-50%);}
 
-/* card style: classic — squared corners, no shadow, colored top bar */
-#canvas.card-classic .node{ border-radius:6px; box-shadow:none; border:1px solid var(--line); border-top:4px solid var(--node-color, var(--accent)); }
-#canvas.card-classic .node.dragging{ box-shadow:0 8px 20px rgba(0,0,0,.22); }
-/* card style: minimal — flat, colored outline, ringed avatar */
-#canvas.card-minimal .node{ border-radius:10px; box-shadow:none; border:1.5px solid var(--node-color, var(--line)); }
-#canvas.card-minimal .node .avatar:not(.has-photo){ background:transparent !important; border:2px solid var(--node-color, var(--accent)); color:var(--node-color, var(--accent)) !important; }
-#canvas.card-minimal .node .avatar.has-photo{ border:2px solid var(--node-color, var(--accent)); }
-
-/* layout direction: horizontal — add-child button sits on the trailing (right) edge */
-#canvas.dir-horizontal .node .addchild{ left:auto; right:-14px; top:50%; bottom:auto; transform:translateY(-50%); }
+.note{
+  position:absolute; width:132px; min-height:70px; border-radius:8px; padding:10px 11px; font-size:12.5px;
+  line-height:1.35; box-shadow:var(--shadow); touch-action:none; user-select:none; white-space:pre-wrap; word-break:break-word;
+  border:1px solid rgba(0,0,0,.08); color:#3a3420;
+}
+.note.dragging{z-index:50; box-shadow:0 10px 26px rgba(0,0,0,.25);}
 
 /* ---- Empty state ---- */
 #empty{
@@ -115,7 +119,7 @@ svg#edges{position:absolute; left:0; top:0; overflow:visible; pointer-events:non
   gap:14px; padding:24px; text-align:center; color:var(--muted); pointer-events:none;
 }
 #empty h2{color:var(--text); margin:0; font-size:19px;}
-#empty p{margin:0; max-width:280px; font-size:14.5px;}
+#empty p{margin:0; max-width:300px; font-size:14.5px;}
 
 /* ---- FAB ---- */
 #fab{
@@ -124,12 +128,22 @@ svg#edges{position:absolute; left:0; top:0; overflow:visible; pointer-events:non
   font-size:28px; box-shadow:var(--shadow); z-index:15; display:flex; align-items:center; justify-content:center;
 }
 #fab:active{background:var(--accent2);}
-.node .addchild:active{background:var(--accent2);}
+#noteFab{
+  position:absolute; right:calc(var(--safe-right) + 18px); bottom:calc(var(--safe-bottom) + 88px);
+  width:44px; height:44px; border-radius:50%; background:#ffe58a; color:#3a3420; border:1px solid rgba(0,0,0,.1);
+  font-size:18px; box-shadow:var(--shadow); z-index:15; display:flex; align-items:center; justify-content:center;
+}
 #fitbtn{
   position:absolute; left:calc(var(--safe-left) + 18px); bottom:calc(var(--safe-bottom) + 22px);
   width:44px; height:44px; border-radius:50%; background:var(--panel); color:var(--text); border:1px solid var(--line);
   font-size:18px; box-shadow:var(--shadow); z-index:15; display:flex; align-items:center; justify-content:center;
 }
+#hint{
+  position:absolute; left:50%; top:14px; transform:translateX(-50%);
+  background:rgba(10,14,20,.82); color:#fff; padding:8px 14px; border-radius:20px; font-size:12.5px; z-index:14;
+  white-space:nowrap; pointer-events:none; opacity:0; transition:opacity .25s; max-width:88vw; text-overflow:ellipsis; overflow:hidden;
+}
+#hint.show{opacity:1;}
 
 /* ---- Sheets / modals ---- */
 .sheet-backdrop{
@@ -140,22 +154,26 @@ svg#edges{position:absolute; left:0; top:0; overflow:visible; pointer-events:non
 .sheet{
   position:absolute; left:0; right:0; bottom:0; background:var(--panel); border-radius:18px 18px 0 0;
   padding:14px 18px calc(var(--safe-bottom) + 18px); transform:translateY(105%); transition:transform .22s ease;
-  box-shadow:0 -4px 24px rgba(0,0,0,.2); max-height:85vh; overflow-y:auto;
+  box-shadow:0 -4px 24px rgba(0,0,0,.2); max-height:88vh; overflow-y:auto;
 }
 .sheet.show{transform:translateY(0);}
 .sheet-handle{width:36px; height:4px; background:var(--line); border-radius:2px; margin:0 auto 14px;}
 .sheet h3{margin:0 0 14px; font-size:17px;}
-.sheet h4{margin:18px 0 8px; font-size:12.5px; color:var(--muted); font-weight:700; text-transform:uppercase; letter-spacing:.03em;}
+.sheet h4{margin:18px 0 8px; font-size:12px; color:var(--muted); font-weight:700; text-transform:uppercase; letter-spacing:.03em;}
 .sheet h4:first-of-type{margin-top:2px;}
 .field{margin-bottom:12px;}
 .field label{display:block; font-size:12.5px; color:var(--muted); margin-bottom:5px; font-weight:600; text-transform:uppercase; letter-spacing:.03em;}
-.field input{
+.field input, .field textarea, .field select{
   width:100%; padding:11px 12px; border-radius:10px; border:1px solid var(--line); background:var(--panel2);
-  color:var(--text); font-size:16px;
+  color:var(--text); font-size:16px; font-family:inherit;
 }
-.colors{display:flex; gap:8px; flex-wrap:wrap; margin-top:2px;}
-.swatch{width:32px; height:32px; border-radius:50%; border:2px solid transparent; flex:0 0 auto; padding:0;}
+.field textarea{resize:vertical; min-height:64px;}
+.colors{display:flex; gap:8px; flex-wrap:wrap; margin-top:2px; align-items:center;}
+.swatch{width:30px; height:30px; border-radius:50%; border:2px solid transparent; flex:0 0 auto; padding:0;}
 .swatch.sel{border-color:var(--text);}
+.customswatch{width:30px; height:30px; border-radius:50%; border:2px dashed var(--line); flex:0 0 auto; padding:0; position:relative; overflow:hidden; background:conic-gradient(red,yellow,lime,cyan,blue,magenta,red);}
+.customswatch.sel{border-style:solid; border-color:var(--text);}
+.customswatch input{position:absolute; inset:-6px; opacity:0; cursor:pointer; width:150%; height:150%;}
 .btnrow{display:flex; gap:10px; margin-top:16px; flex-wrap:wrap;}
 .btn{
   flex:1; padding:12px 14px; border-radius:12px; border:none; font-size:15px; font-weight:600; cursor:pointer;
@@ -165,14 +183,17 @@ svg#edges{position:absolute; left:0; top:0; overflow:visible; pointer-events:non
 .btn.danger{background:var(--danger); color:#fff;}
 .btn.ghost{background:none; color:var(--accent); flex:0 0 auto;}
 
-/* segmented control for design options */
-.seg{display:flex; gap:6px; background:var(--panel2); padding:4px; border-radius:12px;}
+.seg{display:flex; gap:6px; background:var(--panel2); padding:4px; border-radius:12px; flex-wrap:wrap;}
 .seg button{
-  flex:1; padding:9px 6px; border:none; border-radius:9px; background:none; color:var(--muted);
-  font-size:13px; font-weight:600; display:flex; flex-direction:column; align-items:center; gap:4px;
+  flex:1; padding:9px 6px; border:none; border-radius:9px; background:none; color:var(--muted); min-width:60px;
+  font-size:12.5px; font-weight:600; display:flex; flex-direction:column; align-items:center; gap:3px;
 }
 .seg button.sel{background:var(--panel); color:var(--text); box-shadow:var(--shadow);}
 .seg button svg{display:block;}
+
+.texturegrid{display:flex; gap:8px; margin-top:4px; flex-wrap:wrap;}
+.texswatch{width:44px; height:34px; border-radius:8px; border:2px solid var(--line); flex:0 0 auto;}
+.texswatch.sel{border-color:var(--accent);}
 
 .themegrid{display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-top:4px;}
 .themecard{
@@ -192,6 +213,8 @@ svg#edges{position:absolute; left:0; top:0; overflow:visible; pointer-events:non
 .photoBtns{display:flex; flex-direction:column; gap:6px; flex:1;}
 .photoBtns .btn{padding:8px 10px; font-size:13px;}
 
+.linepreview{height:36px; display:flex; align-items:center; margin-bottom:6px;}
+
 .listrow{
   display:flex; align-items:center; gap:10px; padding:12px 4px; border-bottom:1px solid var(--line);
 }
@@ -208,7 +231,6 @@ svg#edges{position:absolute; left:0; top:0; overflow:visible; pointer-events:non
 #toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
 input[type=file]{display:none;}
 
-/* ---- Print / PDF export ---- */
 #printArea{display:none;}
 @media print{
   body > *:not(#printArea){display:none !important;}
@@ -222,7 +244,7 @@ input[type=file]{display:none;}
   <div id="topbar">
     <button class="iconbtn" id="menuBtn" aria-label="Menu">☰</button>
     <input id="chartName" maxlength="60" spellcheck="false" autocomplete="off">
-    <button class="iconbtn" id="designBtn" aria-label="Design">
+    <button class="iconbtn" id="designBtn" aria-label="Chart style">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r="1.2" fill="currentColor" stroke="none"/><circle cx="17.5" cy="10.5" r="1.2" fill="currentColor" stroke="none"/><circle cx="8.5" cy="7.5" r="1.2" fill="currentColor" stroke="none"/><circle cx="6.5" cy="12.5" r="1.2" fill="currentColor" stroke="none"/><path d="M12 2a10 10 0 1 0 3.5 19.4c1-.37 1-1.7.1-2.24-.6-.36-.9-1.05-.66-1.7a1.7 1.7 0 0 1 1.6-1.1H18a4 4 0 0 0 4-4c0-5.5-4.5-10-10-10Z"/></svg>
     </button>
     <button class="iconbtn" id="undoBtn" aria-label="Undo">
@@ -239,10 +261,12 @@ input[type=file]{display:none;}
     </div>
     <div id="empty">
       <h2>No chart yet</h2>
-      <p>Tap the + button to add your first box — that'll be the top of your hierarchy.</p>
+      <p>Tap anywhere on the canvas to drop your first box. Drag from a box's dot handles to connect it to another box (or drag into empty space to spawn a connected one).</p>
     </div>
+    <div id="hint"></div>
     <button id="fitbtn" aria-label="Fit to screen">⤢</button>
-    <button id="fab" aria-label="Add">+</button>
+    <button id="noteFab" aria-label="Add note">🗒</button>
+    <button id="fab" aria-label="Add box">+</button>
   </div>
 </div>
 
@@ -253,7 +277,7 @@ input[type=file]{display:none;}
 <div class="sheet-backdrop" id="editBackdrop">
   <div class="sheet" id="editSheet">
     <div class="sheet-handle"></div>
-    <h3 id="editTitle">Edit box</h3>
+    <h3>Box</h3>
     <div class="previewrow">
       <div class="photoWrap"><div id="photoPreview">?</div></div>
       <div class="photoBtns">
@@ -263,19 +287,120 @@ input[type=file]{display:none;}
     </div>
     <div class="field"><label>Name</label><input id="fName" placeholder="Jane Rivera"></div>
     <div class="field"><label>Title / Role</label><input id="fTitle" placeholder="VP of Operations"></div>
-    <div class="field">
-      <label>Color</label>
-      <div class="colors" id="colorPicker"></div>
+
+    <h4>Shape</h4>
+    <div class="seg" id="segShape">
+      <button data-v="rounded" class="sel">Rounded</button>
+      <button data-v="rect">Rectangle</button>
+      <button data-v="pill">Pill</button>
+      <button data-v="circle">Circle</button>
     </div>
+
+    <h4>Accent / avatar color</h4>
+    <div class="colors" id="colorPicker"></div>
+
+    <h4>Box fill</h4>
+    <div class="seg" id="segFillType">
+      <button data-v="solid" class="sel">Solid</button>
+      <button data-v="gradient">Gradient</button>
+      <button data-v="texture">Texture</button>
+    </div>
+    <div class="colors" id="fillColorPicker" style="margin-top:8px;"></div>
+    <div class="colors" id="fillColor2Picker" style="margin-top:8px;display:none;"></div>
+    <div class="texturegrid" id="fillTextureGrid" style="display:none;"></div>
+
+    <h4>Border</h4>
+    <div class="colors" id="borderColorPicker"></div>
+    <div class="seg" id="segBorderWidth" style="margin-top:8px;">
+      <button data-v="1" class="sel">Thin</button>
+      <button data-v="2.5">Medium</button>
+      <button data-v="4.5">Thick</button>
+    </div>
+    <div class="seg" id="segBorderDash" style="margin-top:8px;">
+      <button data-v="solid" class="sel">Solid</button>
+      <button data-v="dashed">Dashed</button>
+      <button data-v="dotted">Dotted</button>
+    </div>
+
+    <h4>Font &amp; text color</h4>
+    <select id="fFont"></select>
+    <div class="colors" id="textColorPicker" style="margin-top:8px;"></div>
+
     <div class="btnrow">
       <button class="btn" id="fSave">Save</button>
-      <button class="btn secondary" id="fAddChild">+ Add report</button>
+      <button class="btn secondary" id="fAddNote">🗒 Add note</button>
     </div>
     <div class="btnrow">
-      <button class="btn secondary" id="fAddSibling">+ Add peer</button>
-      <button class="btn danger" id="fDelete">Delete</button>
+      <button class="btn danger" id="fDelete">Delete box</button>
+      <button class="btn ghost" id="fCancel">Cancel</button>
     </div>
-    <button class="btn ghost" id="fCancel" style="margin-top:8px;">Cancel</button>
+  </div>
+</div>
+
+<!-- Edge (connector line) edit sheet -->
+<div class="sheet-backdrop" id="edgeBackdrop">
+  <div class="sheet" id="edgeSheet">
+    <div class="sheet-handle"></div>
+    <h3>Connector line</h3>
+    <svg class="linepreview" id="edgePreview" viewBox="0 0 260 36" width="100%"><path id="edgePreviewPath" d="M10 28 L250 8" fill="none"/></svg>
+
+    <div class="field"><label>Label (optional)</label><input id="eLabel" placeholder="e.g. dotted-line report"></div>
+
+    <h4>Color</h4>
+    <div class="colors" id="edgeColorPicker"></div>
+
+    <h4>Thickness</h4>
+    <div class="seg" id="segEdgeWidth">
+      <button data-v="1.5" class="sel">Thin</button>
+      <button data-v="2.5">Medium</button>
+      <button data-v="4">Thick</button>
+    </div>
+
+    <h4>Dash pattern</h4>
+    <div class="seg" id="segEdgeDash">
+      <button data-v="solid" class="sel">Solid</button>
+      <button data-v="dashed">Dashed</button>
+      <button data-v="dotted">Dotted</button>
+    </div>
+
+    <h4>Routing</h4>
+    <div class="seg" id="segEdgeStyle">
+      <button data-v="elbow" class="sel">Elbow</button>
+      <button data-v="curved">Curved</button>
+      <button data-v="straight">Straight</button>
+    </div>
+
+    <h4>Arrowheads</h4>
+    <div class="seg" id="segEdgeArrows">
+      <button data-v="end" class="sel">End only</button>
+      <button data-v="both">Both ends</button>
+      <button data-v="none">None</button>
+    </div>
+
+    <div class="btnrow">
+      <button class="btn" id="eSave">Save</button>
+      <button class="btn secondary" id="eAddNote">🗒 Add note</button>
+    </div>
+    <div class="btnrow">
+      <button class="btn danger" id="eDelete">Delete line</button>
+      <button class="btn ghost" id="eCancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- Note edit sheet -->
+<div class="sheet-backdrop" id="noteBackdrop">
+  <div class="sheet" id="noteSheet">
+    <div class="sheet-handle"></div>
+    <h3>Note</h3>
+    <div class="field"><label>Text</label><textarea id="nText" placeholder="Add context here..."></textarea></div>
+    <h4>Color</h4>
+    <div class="colors" id="noteColorPicker"></div>
+    <div class="btnrow">
+      <button class="btn" id="nSave">Save</button>
+      <button class="btn danger" id="nDelete">Delete note</button>
+    </div>
+    <button class="btn ghost" id="nCancel" style="margin-top:8px;">Cancel</button>
   </div>
 </div>
 
@@ -287,11 +412,11 @@ input[type=file]{display:none;}
     <div id="chartList"></div>
     <div class="btnrow">
       <button class="btn" id="newChartBtn">+ New chart</button>
-      <button class="btn secondary" id="relayoutBtn">Re-layout</button>
+      <button class="btn secondary" id="relayoutBtn">Tidy layout</button>
     </div>
     <div class="divider"></div>
     <div class="btnrow">
-      <button class="btn secondary" id="designOpenBtn">🎨 Design &amp; style</button>
+      <button class="btn secondary" id="designOpenBtn">🎨 Chart style</button>
       <button class="btn secondary" id="exportOpenBtn">⭳ Export &amp; share</button>
     </div>
     <div class="btnrow">
@@ -302,64 +427,33 @@ input[type=file]{display:none;}
   </div>
 </div>
 
-<!-- Design sheet: layout, connectors, card style, color theme, font -->
+<!-- Chart-wide design sheet: background, default font, tidy -->
 <div class="sheet-backdrop" id="designBackdrop">
   <div class="sheet" id="designSheet">
     <div class="sheet-handle"></div>
-    <h3>Design &amp; style</h3>
+    <h3>Chart style</h3>
 
-    <h4>Layout direction</h4>
-    <div class="seg" id="segLayout">
-      <button data-v="vertical" class="sel">
-        <svg width="26" height="22" viewBox="0 0 26 22"><rect x="8" y="1" width="10" height="6" rx="2" fill="currentColor"/><rect x="1" y="15" width="10" height="6" rx="2" fill="currentColor" opacity=".55"/><rect x="15" y="15" width="10" height="6" rx="2" fill="currentColor" opacity=".55"/></svg>
-        Top-down
-      </button>
-      <button data-v="horizontal">
-        <svg width="26" height="22" viewBox="0 0 26 22"><rect x="1" y="8" width="9" height="6" rx="2" fill="currentColor"/><rect x="16" y="1" width="9" height="6" rx="2" fill="currentColor" opacity=".55"/><rect x="16" y="15" width="9" height="6" rx="2" fill="currentColor" opacity=".55"/></svg>
-        Left-right
-      </button>
+    <h4>Background</h4>
+    <div class="seg" id="segBgType">
+      <button data-v="solid" class="sel">Solid</button>
+      <button data-v="gradient">Gradient</button>
+      <button data-v="texture">Texture</button>
     </div>
+    <div class="colors" id="bgColorPicker" style="margin-top:8px;"></div>
+    <div class="colors" id="bgColor2Picker" style="margin-top:8px;display:none;"></div>
+    <div class="texturegrid" id="bgTextureGrid" style="display:none;"></div>
 
-    <h4>Connectors</h4>
-    <div class="seg" id="segConnector">
-      <button data-v="curved">
-        <svg width="26" height="18" viewBox="0 0 26 18"><path d="M4 2 C4 9, 22 9, 22 16" stroke="currentColor" stroke-width="2" fill="none"/></svg>
-        Curved
-      </button>
-      <button data-v="elbow" class="sel">
-        <svg width="26" height="18" viewBox="0 0 26 18"><path d="M4 2 V9 H22 V16" stroke="currentColor" stroke-width="2" fill="none"/></svg>
-        Elbow
-      </button>
-    </div>
+    <h4>Default font (used by boxes without their own override)</h4>
+    <select id="chartFont"></select>
 
-    <h4>Card style</h4>
-    <div class="seg" id="segCard">
-      <button data-v="modern" class="sel">
-        <svg width="30" height="18" viewBox="0 0 30 18"><rect x="2" y="2" width="26" height="14" rx="5" fill="none" stroke="currentColor" stroke-width="2"/></svg>
-        Modern
-      </button>
-      <button data-v="classic">
-        <svg width="30" height="18" viewBox="0 0 30 18"><rect x="2" y="2" width="26" height="14" rx="1" fill="none" stroke="currentColor" stroke-width="2"/><rect x="2" y="2" width="26" height="4" fill="currentColor"/></svg>
-        Classic
-      </button>
-      <button data-v="minimal">
-        <svg width="30" height="18" viewBox="0 0 30 18"><rect x="2" y="2" width="26" height="14" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
-        Minimal
-      </button>
-    </div>
-
-    <h4>Color theme</h4>
+    <h4>Quick presets</h4>
     <div class="themegrid" id="themeGrid"></div>
 
-    <h4>Font</h4>
-    <div class="seg" id="segFont">
-      <button data-v="system" class="sel" style="font-family:-apple-system,sans-serif;">Aa</button>
-      <button data-v="serif" style="font-family:Georgia,serif;">Aa</button>
-      <button data-v="rounded" style="font-family:ui-rounded,sans-serif;">Aa</button>
-      <button data-v="mono" style="font-family:ui-monospace,monospace;">Aa</button>
+    <div class="btnrow">
+      <button class="btn secondary" id="relayoutBtn2">Tidy layout</button>
+      <button class="btn secondary" id="themeBtn2">Toggle light/dark</button>
     </div>
-
-    <button class="btn" id="designDoneBtn" style="margin-top:18px;">Done</button>
+    <button class="btn" id="designDoneBtn" style="margin-top:14px;">Done</button>
   </div>
 </div>
 
