@@ -1183,6 +1183,150 @@
   $('noteFab').addEventListener('click', function () { addNoteAttached({ type: 'free' }); });
 
   // ---------------------------------------------------------------------
+  // Search — find a box / note / connector label and jump to it
+  // ---------------------------------------------------------------------
+  var searchBackdrop = $('searchBackdrop'), searchSheet = $('searchSheet');
+  var searchInput = $('searchInput'), searchResults = $('searchResults');
+
+  function openSearch() {
+    searchInput.value = '';
+    renderSearchResults('');
+    searchBackdrop.classList.add('show');
+    searchSheet.classList.add('show');
+    setTimeout(function () { searchInput.focus(); }, 260);
+  }
+  function closeSearch() {
+    searchBackdrop.classList.remove('show');
+    searchSheet.classList.remove('show');
+    searchInput.blur();
+  }
+  $('searchFab').addEventListener('click', openSearch);
+  $('searchCloseBtn').addEventListener('click', closeSearch);
+  searchBackdrop.addEventListener('click', function (e) { if (e.target === searchBackdrop) closeSearch(); });
+  searchInput.addEventListener('input', function () { renderSearchResults(searchInput.value); });
+  searchInput.addEventListener('keydown', function (e) {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    var first = searchResults.querySelector('.searchresult');
+    if (first) first.click();
+  });
+
+  function highlightMatch(text, q) {
+    var safe = escapeHtml(text || '');
+    if (!q) return safe;
+    var i = (text || '').toLowerCase().indexOf(q.toLowerCase());
+    if (i === -1) return safe;
+    return escapeHtml(text.slice(0, i)) + '<mark>' + escapeHtml(text.slice(i, i + q.length)) + '</mark>' + escapeHtml(text.slice(i + q.length));
+  }
+
+  function collectSearchItems(q) {
+    var chart = getActiveChart();
+    var ql = q.trim().toLowerCase();
+    var out = [];
+    Object.keys(chart.nodes).forEach(function (id) {
+      var n = chart.nodes[id];
+      var hay = [n.name || '', n.title || ''];
+      if (!ql || hay.some(function (h) { return h.toLowerCase().indexOf(ql) !== -1; })) {
+        out.push({ kind: 'node', id: id, name: n.name || 'Unnamed', sub: n.title || '', color: n.color, photo: n.photo });
+      }
+    });
+    Object.keys(chart.notes).forEach(function (id) {
+      var note = chart.notes[id];
+      if (!ql || (note.text || '').toLowerCase().indexOf(ql) !== -1) {
+        out.push({ kind: 'note', id: id, name: note.text || 'Empty note', sub: 'Note', color: note.color, isNote: true });
+      }
+    });
+    Object.keys(chart.edges).forEach(function (id) {
+      var e = chart.edges[id];
+      if (!e.label) return;
+      if (!ql || e.label.toLowerCase().indexOf(ql) !== -1) {
+        var a = chart.nodes[e.from], b = chart.nodes[e.to];
+        out.push({ kind: 'edge', id: id, name: e.label, sub: 'Line: ' + ((a && a.name) || '?') + ' → ' + ((b && b.name) || '?'), color: e.color || '#6b7684' });
+      }
+    });
+    // Alphabetical when browsing, best-prefix-match first when searching.
+    if (ql) {
+      out.sort(function (x, y) {
+        var xs = x.name.toLowerCase().indexOf(ql) === 0 ? 0 : 1;
+        var ys = y.name.toLowerCase().indexOf(ql) === 0 ? 0 : 1;
+        return xs - ys || x.name.localeCompare(y.name);
+      });
+    } else {
+      out.sort(function (x, y) { return x.name.localeCompare(y.name); });
+    }
+    return out;
+  }
+
+  function renderSearchResults(q) {
+    var items = collectSearchItems(q);
+    searchResults.innerHTML = '';
+    if (!items.length) {
+      var empty = document.createElement('p');
+      empty.className = 'smallmuted';
+      empty.textContent = q.trim() ? 'Nothing matches “' + q.trim() + '”.' : 'This chart is empty.';
+      searchResults.appendChild(empty);
+      return;
+    }
+    items.slice(0, 40).forEach(function (item) {
+      var row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'searchresult';
+      var av = document.createElement('div');
+      av.className = 'ravatar';
+      if (item.photo) { av.style.background = "center/cover no-repeat url('" + item.photo + "')"; }
+      else if (item.kind === 'note') { av.style.background = item.color || '#ffe58a'; av.style.color = '#3a3420'; av.textContent = '🗒'; }
+      else if (item.kind === 'edge') { av.style.background = 'transparent'; av.style.color = item.color; av.textContent = '↘'; }
+      else { av.style.background = item.color || COLOR_SWATCHES[0]; av.textContent = initials(item.name); }
+      var txt = document.createElement('div');
+      txt.className = 'rtext';
+      txt.innerHTML = '<div class="rname">' + highlightMatch(item.name, q.trim()) + '</div>' +
+        (item.sub ? '<div class="rsub">' + highlightMatch(item.sub, q.trim()) + '</div>' : '');
+      row.appendChild(av); row.appendChild(txt);
+      row.addEventListener('click', function () { closeSearch(); jumpTo(item); });
+      searchResults.appendChild(row);
+    });
+  }
+
+  // Centre the viewport on a search hit and flash it so it's easy to spot.
+  function jumpTo(item) {
+    var chart = getActiveChart();
+    var cx, cy, el = null;
+    if (item.kind === 'node') {
+      var n = chart.nodes[item.id];
+      if (!n) return;
+      el = nodeEls[item.id];
+      var h = (el && el.offsetHeight) || NODE_H_APPROX;
+      cx = n.x + NODE_W / 2; cy = n.y + h / 2;
+    } else if (item.kind === 'note') {
+      var note = chart.notes[item.id];
+      if (!note) return;
+      el = noteEls[item.id];
+      var pos = noteAnchor(note);
+      cx = pos.x + ((el && el.offsetWidth) || 132) / 2;
+      cy = pos.y + ((el && el.offsetHeight) || 70) / 2;
+    } else {
+      var e = chart.edges[item.id];
+      if (!e) return;
+      var a = chart.nodes[e.from], b = chart.nodes[e.to];
+      if (!a || !b) return;
+      var ha = (nodeEls[e.from] && nodeEls[e.from].offsetHeight) || NODE_H_APPROX;
+      var hb = (nodeEls[e.to] && nodeEls[e.to].offsetHeight) || NODE_H_APPROX;
+      cx = (a.x + NODE_W / 2 + b.x + NODE_W / 2) / 2;
+      cy = (a.y + ha / 2 + b.y + hb / 2) / 2;
+    }
+    scale = Math.min(Math.max(scale, 0.75), 1.4);
+    panX = stage.clientWidth / 2 - cx * scale;
+    panY = stage.clientHeight / 2 - cy * scale;
+    applyTransform();
+    if (el) {
+      el.classList.remove('found');
+      void el.offsetWidth; // restart the animation
+      el.classList.add('found');
+      setTimeout(function () { el.classList.remove('found'); }, 1600);
+    }
+  }
+
+  // ---------------------------------------------------------------------
   // Menu sheet
   // ---------------------------------------------------------------------
   function openMenu() { renderChartList(); menuBackdrop.classList.add('show'); menuSheet.classList.add('show'); }

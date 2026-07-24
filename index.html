@@ -154,6 +154,34 @@ svg#edges{position:absolute; left:0; top:0; overflow:visible;}
   width:44px; height:44px; border-radius:50%; background:var(--panel); color:var(--text); border:1px solid var(--line);
   font-size:18px; box-shadow:var(--shadow); z-index:15; display:flex; align-items:center; justify-content:center;
 }
+#searchFab{
+  position:absolute; left:calc(var(--safe-left) + 18px); bottom:calc(var(--safe-bottom) + 78px);
+  width:44px; height:44px; border-radius:50%; background:var(--panel); color:var(--text); border:1px solid var(--line);
+  box-shadow:var(--shadow); z-index:15; display:flex; align-items:center; justify-content:center;
+}
+#searchFab:active,#fitbtn:active{background:var(--panel2);}
+
+/* Brief highlight when search jumps to a box */
+@keyframes findFlash{
+  0%,100%{box-shadow:var(--shadow);}
+  25%,75%{box-shadow:0 0 0 5px var(--accent), 0 6px 20px rgba(0,0,0,.25);}
+}
+.node.found{animation:findFlash 1.5s ease-in-out;}
+.note.found{animation:findFlash 1.5s ease-in-out;}
+
+.searchresult{
+  display:flex; align-items:center; gap:10px; width:100%; padding:11px 8px; border:none;
+  background:none; border-bottom:1px solid var(--line); text-align:left; color:var(--text);
+}
+.searchresult:active{background:var(--panel2);}
+.searchresult .ravatar{
+  width:32px; height:32px; border-radius:50%; flex:0 0 auto; display:flex; align-items:center;
+  justify-content:center; color:#fff; font-weight:700; font-size:12px; background-size:cover; background-position:center;
+}
+.searchresult .rtext{flex:1; min-width:0;}
+.searchresult .rname{font-size:14.5px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.searchresult .rsub{font-size:12px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.searchresult mark{background:var(--accent); color:#fff; border-radius:3px; padding:0 2px;}
 #hint{
   position:absolute; left:50%; top:14px; transform:translateX(-50%);
   background:rgba(10,14,20,.82); color:#fff; padding:8px 14px; border-radius:20px; font-size:12.5px; z-index:14;
@@ -291,6 +319,9 @@ input[type=file]{display:none;}
       <p>Tap anywhere on the canvas to drop your first box. Drag from a box's dot handles to connect it to another box (or drag into empty space to spawn a connected one).</p>
     </div>
     <div id="hint"></div>
+    <button id="searchFab" aria-label="Find a box">
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4.2-4.2"/></svg>
+    </button>
     <button id="fitbtn" aria-label="Fit to screen">⤢</button>
     <button id="noteFab" aria-label="Add note">🗒</button>
     <button id="fab" aria-label="Add box">+</button>
@@ -429,6 +460,19 @@ input[type=file]{display:none;}
       <button class="btn danger" id="nDelete">Delete note</button>
     </div>
     <button class="btn ghost" id="nCancel" style="margin-top:8px;">Cancel</button>
+  </div>
+</div>
+
+<!-- Search sheet -->
+<div class="sheet-backdrop" id="searchBackdrop">
+  <div class="sheet" id="searchSheet">
+    <div class="sheet-handle"></div>
+    <h3>Find in this chart</h3>
+    <div class="field" style="margin-bottom:6px;">
+      <input id="searchInput" placeholder="Name, title, note or line label" autocomplete="off" spellcheck="false">
+    </div>
+    <div id="searchResults"></div>
+    <button class="btn ghost" id="searchCloseBtn" style="margin-top:10px;">Close</button>
   </div>
 </div>
 
