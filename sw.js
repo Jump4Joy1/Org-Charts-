@@ -1,11 +1,11 @@
-var CACHE = 'orgchart-v3';
+var CACHE = 'orgchart-v4';
 var ASSETS = [
   './',
   './index.html',
   './app.js',
   './manifest.webmanifest',
-  './icons/icon-192.png',
-  './icons/icon-512.png'
+  './icons/icon-192.png?v=2',
+  './icons/icon-512.png?v=2'
 ];
 
 self.addEventListener('install', function (e) {
