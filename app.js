@@ -121,6 +121,7 @@
       if (n.detail === undefined) n.detail = '';
       if (!n.avatarMode) n.avatarMode = 'auto';
       if (!n.layout) n.layout = 'stack';
+      if (!n.align) n.align = (n.layout === 'row') ? 'left' : 'center';
       if (!n.fontScale) n.fontScale = 1;
       if (!n.width) n.width = NODE_W;
     });
@@ -344,10 +345,11 @@
   function applyNodeStyle(el, n) {
     el.dataset.shape = n.shape || 'rounded';
     el.dataset.layout = n.layout || 'stack';
+    el.dataset.align = n.align || 'center';
     var w = nodeW(n);
     var fs = nodeScale(n);
     el.style.width = w + 'px';
-    el.style.height = n.shape === 'circle' ? w + 'px' : '';
+    el.style.height = (n.shape === 'circle' || n.shape === 'square') ? w + 'px' : '';
     el.style.padding = Math.round(10 * fs) + 'px ' + Math.round(12 * fs) + 'px';
     var av = el.querySelector('.avatar');
     var avSize = AVATAR_SIZES[fs] || Math.round(44 * fs);
@@ -823,7 +825,7 @@
     chart.nodes[id] = {
       id: id, name: '', title: '', detail: '', nickname: '', photo: null, x: x, y: y,
       shape: 'rounded', color: randomColor(), fill: defaultFill(), border: defaultBorder(),
-      font: '', textColor: '', avatarMode: (chart.badges === 'hide' ? 'none' : 'auto'), layout: 'stack', fontScale: 1, width: NODE_W, order: Date.now()
+      font: '', textColor: '', avatarMode: (chart.badges === 'hide' ? 'none' : 'auto'), layout: 'stack', align: 'center', fontScale: 1, width: NODE_W, order: Date.now()
     };
     return id;
   }
@@ -1044,6 +1046,7 @@
     refreshPhotoPreview(n);
     wireSeg($('segAvatar'), n.avatarMode || 'auto');
     wireSeg($('segLayout'), n.layout || 'stack');
+    wireSeg($('segAlign'), n.align || 'center');
     wireSeg($('segFontScale'), String(n.fontScale || 1));
     wireSeg($('segWidth'), String(n.width || NODE_W));
     wireSeg(segShape, n.shape || 'rounded');
@@ -1078,6 +1081,7 @@
     n.photo = pendingPhoto || null;
     n.avatarMode = segValue($('segAvatar'));
     n.layout = segValue($('segLayout'));
+    n.align = segValue($('segAlign'));
     n.fontScale = parseFloat(segValue($('segFontScale')));
     n.width = parseInt(segValue($('segWidth')), 10);
     n.shape = segValue(segShape);
@@ -1114,7 +1118,7 @@
   // Each group lists the node properties it copies. Text, photos and
   // positions are deliberately excluded — this only ever copies styling.
   var APPLY_GROUPS = [
-    { key: 'shape', label: 'Shape & card layout', sub: 'Rounded / rect / pill / circle, stacked or compact', props: ['shape', 'layout'] },
+    { key: 'shape', label: 'Shape & card layout', sub: 'Shape, stacked/compact, and text alignment', props: ['shape', 'layout', 'align'] },
     { key: 'colors', label: 'Colours', sub: 'Fill, border, text and badge colour', props: ['fill', 'border', 'textColor', 'color'] },
     { key: 'size', label: 'Text size & box width', sub: 'Makes every card a consistent size', props: ['fontScale', 'width'] },
     { key: 'font', label: 'Font', sub: 'This box’s typeface override', props: ['font'] },
@@ -1812,8 +1816,9 @@
       var accent = n.color || COLOR_SWATCHES[0];
       var shape = n.shape || 'rounded';
       var W = nodeW(n), fs = nodeScale(n);
-      var rx = shape === 'rect' ? 3 : (shape === 'pill' ? h / 2 : (shape === 'circle' ? W / 2 : 14));
-      var boxH = shape === 'circle' ? W : h;
+      var fixedAspect = (shape === 'circle' || shape === 'square');
+      var boxH = fixedAspect ? W : h;
+      var rx = shape === 'rect' ? 3 : (shape === 'pill' ? boxH / 2 : (shape === 'circle' ? W / 2 : (shape === 'square' ? 6 : 14)));
       var fill = n.fill || defaultFill();
       var fillAttr;
       if (fill.type === 'gradient') {
@@ -1830,29 +1835,29 @@
       parts.push('<rect x="' + x + '" y="' + y + '" width="' + W + '" height="' + boxH + '" rx="' + rx + '" fill="' + fillAttr + '" stroke="' + (border.color || panelLine) + '" stroke-width="' + (border.width || 1) + '"' + (dashArr2 ? ' stroke-dasharray="' + dashArr2 + '"' : '') + '/>');
 
       var isRow = (n.layout || 'stack') === 'row';
+      var align = n.align || 'center';
       var padT = 10 * fs, padL = 12 * fs;
       var avR = (AVATAR_SIZES[fs] || 44 * fs) / 2;
-      var cx = isRow ? x + padL + avR : x + W / 2;
-      var cursorY = y + padT;
-      // Compact layout: badge on the left, text left-aligned beside it.
-      var textAnchor = isRow ? 'start' : 'middle';
-      var textX = isRow ? (x + padL + (showsAvatar(n) ? avR * 2 + 10 : 0)) : x + W / 2;
-      var innerW = isRow ? (W - (textX - x) - padL) : (W - 20 * fs);
-      if (showsAvatar(n)) {
-        var avatarCy = isRow ? y + boxH / 2 : cursorY + avR;
-        if (showsPhoto(n)) {
-          var clipId = 'clip' + idx;
-          defs.push('<clipPath id="' + clipId + '"><circle cx="' + cx + '" cy="' + avatarCy + '" r="' + avR + '"/></clipPath>');
-          parts.push('<image href="' + n.photo + '" x="' + (cx - avR) + '" y="' + (avatarCy - avR) + '" width="' + (avR * 2) + '" height="' + (avR * 2) + '" clip-path="url(#' + clipId + ')" preserveAspectRatio="xMidYMid slice"/>');
-        } else {
-          var badge = badgeText(n);
-          // Shrink the badge text if the user typed something longer than initials.
-          var badgeSize = Math.min(15 * fs, (avR * 1.75) / Math.max(1, badge.length) * 1.6);
-          parts.push('<circle cx="' + cx + '" cy="' + avatarCy + '" r="' + avR + '" fill="' + accent + '"/>');
-          parts.push('<text x="' + cx + '" y="' + (avatarCy + badgeSize * 0.35) + '" font-family="' + ((n.font ? FONT_STACKS[n.font] : fontFamily).replace(/"/g, "'")) + '" font-size="' + badgeSize.toFixed(1) + '" font-weight="700" fill="#fff" text-anchor="middle">' + escapeHtml(badge) + '</text>');
-        }
-        if (!isRow) cursorY = avatarCy + avR + 6 * fs;
+      var hasAvatar = showsAvatar(n);
+
+      // Horizontal placement of the text block, honouring the alignment
+      // setting. In compact mode the text sits to the right of the badge.
+      var textLeft, innerW;
+      if (isRow) {
+        textLeft = x + padL + (hasAvatar ? avR * 2 + 10 : 0);
+        innerW = W - (textLeft - x) - padL;
+      } else {
+        textLeft = x + 10 * fs;
+        innerW = W - 20 * fs;
       }
+      var textAnchor = align === 'left' ? 'start' : (align === 'right' ? 'end' : 'middle');
+      var textX = align === 'left' ? textLeft
+        : (align === 'right' ? textLeft + innerW : textLeft + innerW / 2);
+      // The badge follows the alignment in stacked mode so the card reads as
+      // one aligned block; in compact mode it always leads on the left.
+      var cx = isRow ? x + padL + avR
+        : (align === 'left' ? x + 10 * fs + avR
+          : (align === 'right' ? x + W - 10 * fs - avR : x + W / 2));
 
       var tcx = textColorsFor(n);
       var nameColor = tcx.name || textColorDefault;
@@ -1864,12 +1869,40 @@
       var titleLines = n.title ? wrapSvgText(n.title, innerW, titleSize, false) : [];
       var detailLines = n.detail ? wrapSvgText(n.detail, innerW, detailSize, false) : [];
 
+      var textBlockH = nameLines.length * nameSize * 1.25
+        + (titleLines.length ? titleSize * 1.35 + (titleLines.length - 1) * titleSize * 1.2 : 0)
+        + (detailLines.length ? detailSize * 1.35 + (detailLines.length - 1) * detailSize * 1.2 : 0);
+
+      // Work out where the badge and text start before drawing either, so
+      // fixed-height shapes can centre the whole group vertically.
+      var avatarCy, cursorY;
       if (isRow) {
-        var blockH = nameLines.length * nameSize * 1.25
-          + (titleLines.length ? titleSize * 1.35 + (titleLines.length - 1) * titleSize * 1.2 : 0)
-          + (detailLines.length ? detailSize * 1.35 + (detailLines.length - 1) * detailSize * 1.2 : 0);
-        cursorY = y + boxH / 2 - blockH / 2;
+        avatarCy = y + boxH / 2;
+        cursorY = y + boxH / 2 - textBlockH / 2;
+      } else if (fixedAspect) {
+        var wholeH = (hasAvatar ? avR * 2 + 6 * fs : 0) + textBlockH;
+        var blockTop = y + boxH / 2 - wholeH / 2;
+        avatarCy = blockTop + avR;
+        cursorY = blockTop + (hasAvatar ? avR * 2 + 6 * fs : 0);
+      } else {
+        avatarCy = y + padT + avR;
+        cursorY = y + padT + (hasAvatar ? avR * 2 + 6 * fs : 0);
       }
+
+      if (hasAvatar) {
+        if (showsPhoto(n)) {
+          var clipId = 'clip' + idx;
+          defs.push('<clipPath id="' + clipId + '"><circle cx="' + cx + '" cy="' + avatarCy + '" r="' + avR + '"/></clipPath>');
+          parts.push('<image href="' + n.photo + '" x="' + (cx - avR) + '" y="' + (avatarCy - avR) + '" width="' + (avR * 2) + '" height="' + (avR * 2) + '" clip-path="url(#' + clipId + ')" preserveAspectRatio="xMidYMid slice"/>');
+        } else {
+          var badge = badgeText(n);
+          // Shrink the badge text if it's longer than plain initials.
+          var badgeSize = Math.min(15 * fs, (avR * 1.75) / Math.max(1, badge.length) * 1.6);
+          parts.push('<circle cx="' + cx + '" cy="' + avatarCy + '" r="' + avR + '" fill="' + accent + '"/>');
+          parts.push('<text x="' + cx + '" y="' + (avatarCy + badgeSize * 0.35) + '" font-family="' + nameFont + '" font-size="' + badgeSize.toFixed(1) + '" font-weight="700" fill="#fff" text-anchor="middle">' + escapeHtml(badge) + '</text>');
+        }
+      }
+
       cursorY += nameSize;
       nameLines.forEach(function (line, li) {
         parts.push('<text x="' + textX + '" y="' + (cursorY + li * nameSize * 1.25) + '" font-family="' + nameFont + '" font-size="' + nameSize.toFixed(1) + '" font-weight="700" fill="' + nameColor + '" text-anchor="' + textAnchor + '">' + escapeHtml(line) + '</text>');
