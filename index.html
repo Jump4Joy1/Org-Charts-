@@ -191,6 +191,21 @@ svg#edges{position:absolute; left:0; top:0; overflow:visible;}
 .searchresult .rname{font-size:14.5px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
 .searchresult .rsub{font-size:12px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
 .searchresult mark{background:var(--accent); color:#fff; border-radius:3px; padding:0 2px;}
+
+/* Checkbox rows for "apply to all" */
+.checkrow{
+  display:flex; align-items:center; gap:12px; width:100%; padding:13px 6px; border:none;
+  background:none; border-bottom:1px solid var(--line); text-align:left; color:var(--text);
+}
+.checkrow:active{background:var(--panel2);}
+.checkrow .cbox{
+  width:24px; height:24px; border-radius:7px; border:2px solid var(--line); flex:0 0 auto;
+  display:flex; align-items:center; justify-content:center; color:#fff; font-size:14px; font-weight:700;
+}
+.checkrow.on .cbox{background:var(--accent); border-color:var(--accent);}
+.checkrow .ctext{flex:1; min-width:0;}
+.checkrow .ctitle{font-size:15px; font-weight:600;}
+.checkrow .csub{font-size:12px; color:var(--muted);}
 #hint{
   position:absolute; left:50%; top:14px; transform:translateX(-50%);
   background:rgba(10,14,20,.82); color:#fff; padding:8px 14px; border-radius:20px; font-size:12.5px; z-index:14;
@@ -438,10 +453,28 @@ input[type=file]{display:none;}
       <button class="btn secondary" id="fDuplicate">⧉ Duplicate</button>
     </div>
     <div class="btnrow">
+      <button class="btn secondary" id="fApplyAll" style="flex:1;">⇊ Apply this look to all boxes</button>
+    </div>
+    <div class="btnrow">
       <button class="btn secondary" id="fAddNote">🗒 Add note</button>
       <button class="btn danger" id="fDelete">Delete box</button>
     </div>
     <button class="btn ghost" id="fCancel" style="margin-top:8px;">Cancel</button>
+  </div>
+</div>
+
+<!-- Apply-style-to-all sheet -->
+<div class="sheet-backdrop" id="applyBackdrop">
+  <div class="sheet" id="applySheet">
+    <div class="sheet-handle"></div>
+    <h3>Apply this look to all boxes</h3>
+    <p class="smallmuted" id="applyIntro" style="margin-bottom:4px;"></p>
+    <div id="applyOptions"></div>
+    <p class="smallmuted">Names, titles, photos and positions are never changed. You can undo this.</p>
+    <div class="btnrow">
+      <button class="btn" id="applyGo">Apply</button>
+      <button class="btn ghost" id="applyCancel">Cancel</button>
+    </div>
   </div>
 </div>
 

@@ -1108,6 +1108,85 @@
     openEditSheet(copy.id, true);
     toast('Duplicated — styling copied');
   });
+  // ---------------------------------------------------------------------
+  // Apply one box's look to every box
+  // ---------------------------------------------------------------------
+  // Each group lists the node properties it copies. Text, photos and
+  // positions are deliberately excluded — this only ever copies styling.
+  var APPLY_GROUPS = [
+    { key: 'shape', label: 'Shape & card layout', sub: 'Rounded / rect / pill / circle, stacked or compact', props: ['shape', 'layout'] },
+    { key: 'colors', label: 'Colours', sub: 'Fill, border, text and badge colour', props: ['fill', 'border', 'textColor', 'color'] },
+    { key: 'size', label: 'Text size & box width', sub: 'Makes every card a consistent size', props: ['fontScale', 'width'] },
+    { key: 'font', label: 'Font', sub: 'This box’s typeface override', props: ['font'] },
+    { key: 'badge', label: 'Badge visibility', sub: 'Photo/badge, badge only, or hidden', props: ['avatarMode'] }
+  ];
+  var applySelection = { shape: true, colors: true, size: true, font: true, badge: true };
+  var applySourceId = null;
+  var applyBackdrop = $('applyBackdrop'), applySheet = $('applySheet');
+
+  function openApplySheet(sourceId) {
+    applySourceId = sourceId;
+    var chart = getActiveChart();
+    var others = Object.keys(chart.nodes).length - 1;
+    $('applyIntro').textContent = others > 0
+      ? 'Copy this box’s styling to the other ' + others + ' box' + (others === 1 ? '' : 'es') + '. Choose what to copy:'
+      : 'There are no other boxes in this chart yet.';
+    var box = $('applyOptions');
+    box.innerHTML = '';
+    APPLY_GROUPS.forEach(function (g) {
+      var row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'checkrow' + (applySelection[g.key] ? ' on' : '');
+      row.innerHTML = '<div class="cbox">' + (applySelection[g.key] ? '✓' : '') + '</div>' +
+        '<div class="ctext"><div class="ctitle">' + escapeHtml(g.label) + '</div><div class="csub">' + escapeHtml(g.sub) + '</div></div>';
+      row.addEventListener('click', function () {
+        applySelection[g.key] = !applySelection[g.key];
+        row.classList.toggle('on', applySelection[g.key]);
+        row.querySelector('.cbox').textContent = applySelection[g.key] ? '✓' : '';
+      });
+      box.appendChild(row);
+    });
+    applyBackdrop.classList.add('show');
+    applySheet.classList.add('show');
+  }
+  function closeApplySheet() { applyBackdrop.classList.remove('show'); applySheet.classList.remove('show'); }
+
+  $('fApplyAll').addEventListener('click', function () {
+    if (!editingId) return;
+    var id = editingId;
+    // Commit any pending edits first, so the look being copied is what's shown.
+    $('fSave').click();
+    setTimeout(function () { openApplySheet(id); }, 60);
+  });
+  $('applyCancel').addEventListener('click', closeApplySheet);
+  applyBackdrop.addEventListener('click', function (e) { if (e.target === applyBackdrop) closeApplySheet(); });
+
+  $('applyGo').addEventListener('click', function () {
+    var chart = getActiveChart();
+    var src = chart.nodes[applySourceId];
+    if (!src) { closeApplySheet(); return; }
+    var props = [];
+    APPLY_GROUPS.forEach(function (g) { if (applySelection[g.key]) props = props.concat(g.props); });
+    if (!props.length) { toast('Nothing selected'); return; }
+    pushUndo();
+    var count = 0;
+    Object.keys(chart.nodes).forEach(function (nid) {
+      if (nid === applySourceId) return;
+      var n = chart.nodes[nid];
+      props.forEach(function (p) {
+        var v = src[p];
+        n[p] = (v && typeof v === 'object') ? JSON.parse(JSON.stringify(v)) : v;
+      });
+      count++;
+    });
+    // Keep the chart-wide badge default in step when badge mode was copied.
+    if (applySelection.badge) chart.badges = (src.avatarMode === 'none') ? 'hide' : 'show';
+    saveState();
+    closeApplySheet();
+    render();
+    toast(count ? ('Applied to ' + count + ' box' + (count === 1 ? '' : 'es')) : 'No other boxes to update');
+  });
+
   $('fAddNote').addEventListener('click', function () { if (editingId) { var id = editingId; closeEditSheet(); addNoteAttached({ type: 'node', id: id }); } });
   $('fDelete').addEventListener('click', function () { if (editingId) deleteNode(editingId); });
   $('fCancel').addEventListener('click', closeEditSheet);
