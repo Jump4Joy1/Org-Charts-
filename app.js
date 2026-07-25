@@ -109,6 +109,7 @@
     if (c.snap === undefined) c.snap = true;
     if (!c.titleBlock) c.titleBlock = { show: false, title: '', subtitle: '', date: '', x: null, y: null };
     if (!c.legend) c.legend = { show: false, title: 'Key', items: [], x: null, y: null };
+    if (!c.groups) c.groups = {};
     Object.keys(c.nodes).forEach(function (id) {
       var n = c.nodes[id];
       if (n.parentId) {
@@ -148,6 +149,7 @@
     return { id: id, name: name || 'Untitled chart', nodes: {}, edges: {}, notes: {}, background: defaultBackground(), font: 'system', badges: 'show', trunk: true, snap: true,
       titleBlock: { show: false, title: '', subtitle: '', date: '', x: null, y: null },
       legend: { show: false, title: 'Key', items: [], x: null, y: null },
+      groups: {},
       updatedAt: Date.now() };
   }
 
@@ -492,6 +494,7 @@
       el.style.top = pos.y + 'px';
     });
 
+    renderGroups();
     renderTitleBlock();
     renderLegend();
     drawEdges();
@@ -1947,6 +1950,196 @@
   });
   designBackdrop.addEventListener('click', function (e) { if (e.target === designBackdrop) closeDesign(); });
 
+  // -------------------------------------------------------------------
+  // Department containers
+  // -------------------------------------------------------------------
+  // A labelled panel drawn behind cards to bundle a division visually.
+  // Dragging the panel moves the cards sitting inside it, which is what
+  // makes it feel like a real group rather than a rectangle.
+  var groupEls = {};
+
+  function renderGroups() {
+    var chart = getActiveChart();
+    Object.keys(groupEls).forEach(function (id) {
+      if (!chart.groups[id]) { groupEls[id].remove(); delete groupEls[id]; }
+    });
+    Object.keys(chart.groups).forEach(function (id) {
+      var g = chart.groups[id];
+      var el = groupEls[id];
+      if (!el) {
+        el = document.createElement('div');
+        el.className = 'groupbox';
+        el.dataset.id = id;
+        el.innerHTML = '<div class="gbLabel"></div><div class="gbGrip"></div>';
+        // Behind the cards but above the background.
+        canvas.insertBefore(el, canvas.firstChild);
+        groupEls[id] = el;
+        wireGroupEvents(el);
+      }
+      el.style.left = g.x + 'px';
+      el.style.top = g.y + 'px';
+      el.style.width = g.w + 'px';
+      el.style.height = g.h + 'px';
+      el.style.borderColor = g.color;
+      el.style.background = hexToRgba(g.color, 0.08);
+      el.style.borderStyle = g.dash === 'dashed' ? 'dashed' : 'solid';
+      var lab = el.querySelector('.gbLabel');
+      lab.textContent = g.label || '';
+      lab.style.display = g.label ? 'block' : 'none';
+      lab.style.background = g.color;
+    });
+  }
+
+  function hexToRgba(hex, a) {
+    var c = hexToRgb(hex) || { r: 53, g: 104, b: 212 };
+    return 'rgba(' + c.r + ',' + c.g + ',' + c.b + ',' + a + ')';
+  }
+
+  // Which boxes currently sit inside this container.
+  function nodesInGroup(g) {
+    var chart = getActiveChart();
+    return Object.keys(chart.nodes).filter(function (id) {
+      var n = chart.nodes[id];
+      var h = (nodeEls[id] && nodeEls[id].offsetHeight) || NODE_H_APPROX;
+      var cx = n.x + nodeW(n) / 2, cy = n.y + h / 2;
+      return cx >= g.x && cx <= g.x + g.w && cy >= g.y && cy <= g.y + g.h;
+    });
+  }
+
+  function wireGroupEvents(el) {
+    var id = el.dataset.id;
+    // Resize from the corner grip.
+    el.querySelector('.gbGrip').addEventListener('pointerdown', function (e) {
+      e.stopPropagation();
+      var grip = e.currentTarget;
+      try { grip.setPointerCapture(e.pointerId); } catch (err) {}
+      var g = getActiveChart().groups[id];
+      var sx = e.clientX, sy = e.clientY, ow = g.w, oh = g.h;
+      var preSnap = snapshot(), moved = false;
+      function mv(ev) {
+        moved = true;
+        g.w = Math.max(120, ow + (ev.clientX - sx) / scale);
+        g.h = Math.max(90, oh + (ev.clientY - sy) / scale);
+        el.style.width = g.w + 'px';
+        el.style.height = g.h + 'px';
+      }
+      function up() {
+        grip.removeEventListener('pointermove', mv);
+        grip.removeEventListener('pointerup', up);
+        grip.removeEventListener('pointercancel', up);
+        if (moved) { commitUndo(preSnap); saveState(); }
+      }
+      grip.addEventListener('pointermove', mv);
+      grip.addEventListener('pointerup', up);
+      grip.addEventListener('pointercancel', up);
+    });
+
+    el.addEventListener('pointerdown', function (e) {
+      if (e.target.closest('.gbGrip')) return;
+      e.stopPropagation();
+      var chart = getActiveChart();
+      var g = chart.groups[id];
+      try { el.setPointerCapture(e.pointerId); } catch (err) {}
+      var sx = e.clientX, sy = e.clientY;
+      var ox = g.x, oy = g.y;
+      // Capture the members up front so boxes don't join or leave mid-drag.
+      var members = nodesInGroup(g).map(function (nid) {
+        return { id: nid, x: chart.nodes[nid].x, y: chart.nodes[nid].y };
+      });
+      var moved = false, preSnap = null;
+      function mv(ev) {
+        var dx = (ev.clientX - sx) / scale, dy = (ev.clientY - sy) / scale;
+        if (!moved && (Math.abs(ev.clientX - sx) > 6 || Math.abs(ev.clientY - sy) > 6)) {
+          moved = true; preSnap = snapshot(); el.classList.add('dragging');
+        }
+        if (!moved) return;
+        g.x = ox + dx; g.y = oy + dy;
+        el.style.left = g.x + 'px';
+        el.style.top = g.y + 'px';
+        members.forEach(function (m) {
+          chart.nodes[m.id].x = m.x + dx;
+          chart.nodes[m.id].y = m.y + dy;
+        });
+        renderPositionsOnly();
+      }
+      function up() {
+        el.removeEventListener('pointermove', mv);
+        el.removeEventListener('pointerup', up);
+        el.removeEventListener('pointercancel', up);
+        el.classList.remove('dragging');
+        if (moved) { commitUndo(preSnap); saveState(); }
+        else openGroupSheet(id);
+      }
+      el.addEventListener('pointermove', mv);
+      el.addEventListener('pointerup', up);
+      el.addEventListener('pointercancel', up);
+    });
+  }
+
+  function addGroup() {
+    pushUndo();
+    var chart = getActiveChart();
+    var id = uid();
+    var c = clientToCanvas(stage.clientWidth / 2, stage.clientHeight / 2);
+    chart.groups[id] = {
+      id: id, label: 'Department', color: COLOR_SWATCHES[Object.keys(chart.groups).length % COLOR_SWATCHES.length],
+      dash: 'solid', x: c.x - 170, y: c.y - 120, w: 340, h: 240
+    };
+    saveState(); render();
+    openGroupSheet(id);
+  }
+  $('groupFab').addEventListener('click', addGroup);
+
+  // ---- group editor ----
+  var editingGroupId = null;
+  var groupBackdrop = $('groupBackdrop'), groupSheet = $('groupSheet');
+  function openGroupSheet(id) {
+    editingGroupId = id;
+    var g = getActiveChart().groups[id];
+    if (!g) return;
+    $('gLabel').value = g.label || '';
+    buildColorRow($('gColor'), g.color, function (c) {
+      g.color = c; renderGroups();
+    });
+    wireSeg($('segGroupDash'), g.dash || 'solid', function (v) { g.dash = v; renderGroups(); });
+    $('gFit').onclick = function () {
+      // Shrink-wrap the container around the cards inside it.
+      var chart = getActiveChart();
+      var ids = nodesInGroup(g);
+      if (!ids.length) { toast('No boxes inside this container'); return; }
+      pushUndo();
+      var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      ids.forEach(function (nid) {
+        var n = chart.nodes[nid];
+        var h = (nodeEls[nid] && nodeEls[nid].offsetHeight) || NODE_H_APPROX;
+        minX = Math.min(minX, n.x); minY = Math.min(minY, n.y);
+        maxX = Math.max(maxX, n.x + nodeW(n)); maxY = Math.max(maxY, n.y + h);
+      });
+      var m = 26;
+      g.x = minX - m; g.y = minY - m;
+      g.w = (maxX - minX) + m * 2; g.h = (maxY - minY) + m * 2;
+      saveState(); render();
+      toast('Wrapped ' + ids.length + ' box' + (ids.length === 1 ? '' : 'es'));
+    };
+    groupBackdrop.classList.add('show');
+    groupSheet.classList.add('show');
+  }
+  function closeGroupSheet() { groupBackdrop.classList.remove('show'); groupSheet.classList.remove('show'); editingGroupId = null; }
+  $('gLabel').addEventListener('input', function () {
+    if (!editingGroupId) return;
+    getActiveChart().groups[editingGroupId].label = $('gLabel').value;
+    renderGroups();
+  });
+  $('gSave').addEventListener('click', function () { saveState(); closeGroupSheet(); render(); });
+  $('gDelete').addEventListener('click', function () {
+    if (!editingGroupId) return;
+    if (!window.confirm('Delete this container? The boxes inside are kept.')) return;
+    pushUndo();
+    delete getActiveChart().groups[editingGroupId];
+    saveState(); closeGroupSheet(); render();
+  });
+  groupBackdrop.addEventListener('click', function (e) { if (e.target === groupBackdrop) { saveState(); closeGroupSheet(); } });
+
   // ---------------------------------------------------------------------
   // Title block & legend editor
   // ---------------------------------------------------------------------
@@ -2171,6 +2364,11 @@
       minX = Math.min(minX, pos.x); minY = Math.min(minY, pos.y);
       maxX = Math.max(maxX, pos.x + 132); maxY = Math.max(maxY, pos.y + 70);
     });
+    Object.keys(chart.groups || {}).forEach(function (id) {
+      var g = chart.groups[id];
+      minX = Math.min(minX, g.x); minY = Math.min(minY, g.y);
+      maxX = Math.max(maxX, g.x + g.w); maxY = Math.max(maxY, g.y + g.h);
+    });
     // The title block and legend are part of the drawing, so they have to
     // widen the export bounds too or they'd be cropped off.
     var tb = chart.titleBlock, lg = chart.legend;
@@ -2208,6 +2406,20 @@
     }
 
     function toDoc(x, y) { return { x: x - minX + pad, y: y - minY + pad }; }
+
+    // Department containers sit behind the cards and connectors.
+    Object.keys(chart.groups || {}).forEach(function (id) {
+      var g = chart.groups[id];
+      var gp = toDoc(g.x, g.y);
+      var gc = hexToRgb(g.color) || { r: 53, g: 104, b: 212 };
+      var gFill = 'rgba(' + gc.r + ',' + gc.g + ',' + gc.b + ',0.08)';
+      parts.push('<rect x="' + gp.x + '" y="' + gp.y + '" width="' + g.w + '" height="' + g.h + '" rx="14" fill="' + gFill + '" stroke="' + g.color + '" stroke-width="2"' + (g.dash === 'dashed' ? ' stroke-dasharray="8 6"' : '') + '/>');
+      if (g.label) {
+        var lw = measureTextWidth(g.label.toUpperCase(), 11.5, true, fontFamily) + 18;
+        parts.push('<rect x="' + (gp.x + 14) + '" y="' + (gp.y - 11) + '" width="' + lw + '" height="21" rx="10.5" fill="' + g.color + '"/>');
+        parts.push('<text x="' + (gp.x + 14 + lw / 2) + '" y="' + (gp.y + 3.5) + '" font-family="' + fontFamily + '" font-size="11.5" font-weight="700" letter-spacing="0.5" fill="#ffffff" text-anchor="middle">' + escapeHtml(g.label.toUpperCase()) + '</text>');
+      }
+    });
 
     var heightOfExp = function (id) { return (nodeEls[id] && nodeEls[id].offsetHeight) || NODE_H_APPROX; };
     // Build trunk routes in chart space, then shift them into page space.
@@ -2472,6 +2684,37 @@
     }
   }
 
+  // -------------------------------------------------------------------
+  // Page framing for PDF / print
+  // -------------------------------------------------------------------
+  // Wraps the chart SVG onto a real paper size at 96dpi with margins, so a
+  // PDF reads as a document instead of a tight crop of the artwork.
+  var PAGE_SIZES = { letter: [816, 1056], a4: [794, 1123] };
+  var pageChoice = 'fit', pageOrient = 'landscape';
+
+  function framedSvg(built) {
+    if (pageChoice === 'fit' || !PAGE_SIZES[pageChoice]) return built;
+    var dims = PAGE_SIZES[pageChoice].slice();
+    if (pageOrient === 'landscape') dims.reverse();
+    var PW = dims[0], PH = dims[1];
+    var margin = 48;
+    var availW = PW - margin * 2, availH = PH - margin * 2;
+    var k = Math.min(availW / built.width, availH / built.height, 1);
+    var dw = built.width * k, dh = built.height * k;
+    var dx = (PW - dw) / 2, dy = (PH - dh) / 2;
+    // Strip the outer <svg> wrapper and re-nest the content at page scale.
+    var inner = built.svg.replace(/^<svg[^>]*>/, '').replace(/<\/svg>$/, '');
+    var isDark = resolvedAppearance() !== 'light';
+    var paper = isDark ? '#12161c' : '#ffffff';
+    return {
+      svg: '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="' + PW + '" height="' + PH + '" viewBox="0 0 ' + PW + ' ' + PH + '">' +
+           '<rect x="0" y="0" width="' + PW + '" height="' + PH + '" fill="' + paper + '"/>' +
+           '<g transform="translate(' + dx + ',' + dy + ') scale(' + k + ')">' + inner + '</g>' +
+           '</svg>',
+      width: PW, height: PH
+    };
+  }
+
   function rasterize(svgStr, W, H, mime, quality, cb) {
     var svgBlob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
     var url = URL.createObjectURL(svgBlob);
@@ -2496,6 +2739,9 @@
     if (!built) { toast('Nothing to export'); return; }
     rasterize(built.svg, built.width, built.height, mime, quality, function (blob) { shareOrDownload(blob, baseFilename() + '.' + ext, mime); });
   }
+  wireSeg($('segPage'), 'fit', function (v) { pageChoice = v; });
+  wireSeg($('segOrient'), 'landscape', function (v) { pageOrient = v; });
+
   $('exportPngBtn').addEventListener('click', function () { exportRaster('image/png', 'png'); });
   $('exportJpgBtn').addEventListener('click', function () { exportRaster('image/jpeg', 'jpg', 0.92); });
   $('exportSvgBtn').addEventListener('click', function () {
@@ -2506,6 +2752,7 @@
   $('exportPdfBtn').addEventListener('click', function () {
     var built = buildChartSvg();
     if (!built) { toast('Nothing to export'); return; }
+    built = framedSvg(built);
     printArea.innerHTML = built.svg;
     closeExport();
     setTimeout(function () { window.print(); }, 50);

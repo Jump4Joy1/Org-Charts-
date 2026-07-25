@@ -78,8 +78,11 @@ body{
 /* ---- Stage ---- */
 #stage{flex:1; position:relative; overflow:hidden; background:var(--stage-bg, var(--bg));}
 #canvas{position:absolute; left:0; top:0; transform-origin:0 0; will-change:transform; font-family:var(--chart-font);}
-svg#edges{position:absolute; left:0; top:0; overflow:visible;}
-.edge-hit{fill:none; stroke:transparent; stroke-width:22px; cursor:pointer;}
+/* An <svg> with no width/height falls back to a 300x150 replaced box that
+   would swallow taps in that corner of the canvas, so the element itself is
+   transparent to pointers and only the edge hit-paths opt back in. */
+svg#edges{position:absolute; left:0; top:0; overflow:visible; pointer-events:none;}
+.edge-hit{fill:none; stroke:transparent; stroke-width:22px; cursor:pointer; pointer-events:stroke;}
 .edge-line{fill:none; pointer-events:none;}
 .edge-label-bg{pointer-events:none;}
 .edge-label{pointer-events:none; text-anchor:middle; dominant-baseline:middle;}
@@ -153,6 +156,23 @@ svg#guides{position:absolute; left:0; top:0; overflow:visible; pointer-events:no
 }
 .note.dragging{z-index:50; box-shadow:0 10px 26px rgba(0,0,0,.25);}
 
+/* Department container: a labelled panel drawn behind a set of cards. */
+.groupbox{
+  position:absolute; touch-action:none; user-select:none; z-index:0;
+  border:2px solid var(--accent); border-radius:14px;
+  background:color-mix(in srgb, var(--accent) 8%, transparent);
+}
+.groupbox.dragging{box-shadow:0 10px 26px rgba(0,0,0,.25);}
+.groupbox .gbLabel{
+  position:absolute; top:-11px; left:14px; padding:2px 9px; border-radius:20px;
+  font-size:11.5px; font-weight:700; letter-spacing:.04em; text-transform:uppercase;
+  background:var(--accent); color:#fff; white-space:nowrap;
+}
+.groupbox .gbGrip{
+  position:absolute; right:-9px; bottom:-9px; width:22px; height:22px; border-radius:6px;
+  background:var(--panel); border:2px solid var(--accent); touch-action:none;
+}
+
 /* Title block + legend live on the canvas and are draggable like notes. */
 /* #canvas has no intrinsic width, so absolutely-positioned children would
    shrink-to-fit against a zero-width containing block and collapse to one
@@ -205,6 +225,12 @@ svg#guides{position:absolute; left:0; top:0; overflow:visible; pointer-events:no
   position:absolute; right:calc(var(--safe-right) + 18px); bottom:calc(var(--safe-bottom) + 88px);
   width:44px; height:44px; border-radius:50%; background:#ffe58a; color:#3a3420; border:1px solid rgba(0,0,0,.1);
   font-size:18px; box-shadow:var(--shadow); z-index:15; display:flex; align-items:center; justify-content:center;
+}
+#groupFab{
+  position:absolute; right:calc(var(--safe-right) + 18px); bottom:calc(var(--safe-bottom) + 144px);
+  width:44px; height:44px; border-radius:50%; background:var(--panel); color:var(--accent);
+  border:1px solid var(--line); font-size:19px; box-shadow:var(--shadow); z-index:15;
+  display:flex; align-items:center; justify-content:center;
 }
 #fitbtn{
   position:absolute; left:calc(var(--safe-left) + 18px); bottom:calc(var(--safe-bottom) + 22px);
@@ -395,6 +421,7 @@ input[type=file]{display:none;}
       <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4.2-4.2"/></svg>
     </button>
     <button id="fitbtn" aria-label="Fit to screen">⤢</button>
+    <button id="groupFab" aria-label="Add department container">▢</button>
     <button id="noteFab" aria-label="Add note">🗒</button>
     <button id="fab" aria-label="Add box">+</button>
   </div>
@@ -525,6 +552,28 @@ input[type=file]{display:none;}
       <button class="btn danger" id="fDelete">Delete box</button>
     </div>
     <button class="btn ghost" id="fCancel" style="margin-top:8px;">Cancel</button>
+  </div>
+</div>
+
+<!-- Department container sheet -->
+<div class="sheet-backdrop" id="groupBackdrop">
+  <div class="sheet" id="groupSheet">
+    <div class="sheet-handle"></div>
+    <h3>Department container</h3>
+    <div class="field"><label>Label</label><input id="gLabel" placeholder="Operations"></div>
+    <h4>Colour</h4>
+    <div class="colors" id="gColor"></div>
+    <h4>Border</h4>
+    <div class="seg" id="segGroupDash">
+      <button data-v="solid" class="sel">Solid</button>
+      <button data-v="dashed">Dashed</button>
+    </div>
+    <button class="btn secondary" id="gFit" style="margin-top:14px;width:100%;">⤡ Wrap around the boxes inside</button>
+    <p class="smallmuted">Drag the container to move it and everything inside together. Drag the corner grip to resize.</p>
+    <div class="btnrow">
+      <button class="btn" id="gSave">Done</button>
+      <button class="btn danger" id="gDelete">Delete container</button>
+    </div>
   </div>
 </div>
 
@@ -759,6 +808,18 @@ input[type=file]{display:none;}
       <button class="btn secondary" id="exportSvgBtn">SVG (vector)</button>
       <button class="btn secondary" id="exportPdfBtn">PDF</button>
     </div>
+
+    <h4>Page setup (for PDF &amp; print)</h4>
+    <div class="seg" id="segPage">
+      <button data-v="fit" class="sel">Fit to art</button>
+      <button data-v="letter">Letter</button>
+      <button data-v="a4">A4</button>
+    </div>
+    <div class="seg" id="segOrient" style="margin-top:8px;">
+      <button data-v="landscape" class="sel">Landscape</button>
+      <button data-v="portrait">Portrait</button>
+    </div>
+    <p class="smallmuted">Choosing Letter or A4 lays the chart out on a real page with margins, so the PDF looks like a document rather than a tight crop.</p>
     <h4>Backup</h4>
     <div class="btnrow">
       <button class="btn secondary" id="exportBtn">Export JSON</button>
