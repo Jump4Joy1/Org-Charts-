@@ -104,10 +104,21 @@ svg#guides{position:absolute; left:0; top:0; overflow:visible; pointer-events:no
    vertically rather than stacking from the top. */
 .node[data-shape="circle"]{border-radius:50%; justify-content:center; overflow:hidden;}
 .node[data-shape="square"]{border-radius:6px; justify-content:center;}
+/* A box given an explicit height centres its content too, so the card doesn't
+   sit top-heavy in the space the user asked for. Clipping happens on the text
+   block rather than the card: overflow:hidden on .node would also swallow the
+   connector handles and the resize grip, which sit outside its edges.
+   min-height:0 is what lets a flex item shrink below its content and clip. */
+.node[data-fixedh="1"]{justify-content:center;}
+.node[data-fixedh="1"] .ntext{min-height:0; overflow:hidden;}
 .node .avatar{
   width:44px; height:44px; border-radius:50%; display:flex; align-items:center; justify-content:center;
   color:#fff; font-weight:700; font-size:15px; margin-bottom:2px; flex:0 0 auto; background-size:cover; background-position:center;
+  padding:0 2px; white-space:nowrap;
 }
+/* A nickname badge wider than a couple of initials becomes a pill so the
+   text stays readable instead of shrinking into nothing. */
+.node .avatar.pill{border-radius:999px; width:auto !important;}
 .node .ntext{display:flex; flex-direction:column; gap:2px; min-width:0; width:100%;}
 .node .nname{font-size:14.5px; font-weight:600; line-height:1.25; word-break:break-word;}
 .node .ntitle{font-size:12px; color:var(--muted); line-height:1.2; word-break:break-word;}
@@ -148,6 +159,30 @@ svg#guides{position:absolute; left:0; top:0; overflow:visible; pointer-events:no
 .handle.e{right:-7px; top:50%; margin-top:-6.5px;}
 .handle.w{left:-7px; top:50%; margin-top:-6.5px;}
 .handle.n:active,.handle.s:active,.handle.e:active,.handle.w:active{transform:scale(1.35);}
+
+/* Bottom-right grip for resizing a box directly on the canvas. Square rather
+   than round so it reads differently from the connector handles. */
+.szgrip{
+  position:absolute; right:-8px; bottom:-8px; width:16px; height:16px; border-radius:5px;
+  background:var(--panel); border:2px solid var(--accent); opacity:.45; z-index:9; touch-action:none;
+  transition:opacity .15s, transform .15s;
+}
+.szgrip::before{
+  content:''; position:absolute; left:50%; top:50%;
+  width:42px; height:42px; transform:translate(-50%,-50%); border-radius:50%;
+}
+.szgrip:active{opacity:1; transform:scale(1.25);}
+.node:active .szgrip, .node.dragging .szgrip, .node.resizing .szgrip{opacity:.95;}
+/* Circles clip their own overflow, so the grip has to sit inside the rim. */
+.node[data-shape="circle"] .szgrip{right:11%; bottom:11%;}
+.node.resizing{z-index:50; box-shadow:0 10px 26px rgba(0,0,0,.25);}
+#sizeReadout{
+  position:fixed; left:50%; top:14px; transform:translateX(-50%); z-index:120;
+  background:rgba(20,24,30,.92); color:#fff; font-size:12.5px; font-weight:700;
+  font-variant-numeric:tabular-nums; padding:6px 12px; border-radius:20px;
+  pointer-events:none; opacity:0; transition:opacity .12s;
+}
+#sizeReadout.show{opacity:1;}
 
 .note{
   position:absolute; width:132px; min-height:70px; border-radius:8px; padding:10px 11px; font-size:12.5px;
@@ -341,6 +376,24 @@ svg#guides{position:absolute; left:0; top:0; overflow:visible; pointer-events:no
 .seg button.sel{background:var(--panel); color:var(--text); box-shadow:var(--shadow);}
 .seg button svg{display:block;}
 
+/* Continuous size sliders. Track/thumb need vendor pseudo-elements because
+   iOS Safari gives range inputs no usable default once appearance is reset. */
+.sizerow{display:flex; align-items:center; gap:10px; margin-top:10px;}
+.sizerow > label{flex:0 0 50px; font-size:12px; color:var(--muted); font-weight:700; text-transform:uppercase; letter-spacing:.03em; margin:0;}
+.sizerow .val{flex:0 0 54px; text-align:right; font-size:13px; font-weight:700; color:var(--text); font-variant-numeric:tabular-nums;}
+.sizerow.off{opacity:.38; pointer-events:none;}
+.sizerow input[type=range]{
+  flex:1; min-width:0; -webkit-appearance:none; appearance:none; background:transparent; height:30px; margin:0;
+}
+.sizerow input[type=range]::-webkit-slider-runnable-track{height:5px; border-radius:3px; background:var(--panel2);}
+.sizerow input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none; width:26px; height:26px; margin-top:-10.5px; border-radius:50%;
+  background:var(--panel); border:2px solid var(--accent); box-shadow:var(--shadow);
+}
+.sizerow input[type=range]::-moz-range-track{height:5px; border-radius:3px; background:var(--panel2);}
+.sizerow input[type=range]::-moz-range-thumb{width:22px; height:22px; border-radius:50%; background:var(--panel); border:2px solid var(--accent);}
+.sizehint{font-size:11.5px; color:var(--muted); margin-top:8px; line-height:1.35;}
+
 .texturegrid{display:flex; gap:8px; margin-top:4px; flex-wrap:wrap;}
 .texswatch{width:44px; height:34px; border-radius:8px; border:2px solid var(--line); flex:0 0 auto;}
 .texswatch.sel{border-color:var(--accent);}
@@ -359,7 +412,11 @@ svg#guides{position:absolute; left:0; top:0; overflow:visible; pointer-events:no
 #photoPreview{
   width:64px; height:64px; border-radius:50%; background:var(--panel2); display:flex; align-items:center; justify-content:center;
   font-weight:700; font-size:20px; color:#fff; background-size:cover; background-position:center; border:1px solid var(--line);
+  padding:0 6px; text-align:center; overflow:hidden; line-height:1.05; word-break:break-word;
 }
+/* "No badge" is still worth previewing — shown faded so it's clear the card
+   won't display it. */
+#photoPreview.dimmed{opacity:.3;}
 .photoBtns{display:flex; flex-direction:column; gap:6px; flex:1;}
 .photoBtns .btn{padding:8px 10px; font-size:13px;}
 
@@ -428,6 +485,7 @@ input[type=file]{display:none;}
 </div>
 
 <div id="toast"></div>
+<div id="sizeReadout"></div>
 <div id="printArea"></div>
 
 <!-- Node edit sheet -->
@@ -448,14 +506,15 @@ input[type=file]{display:none;}
 
     <h4>Badge</h4>
     <div class="seg" id="segAvatar">
-      <button data-v="auto" class="sel">Photo / badge</button>
-      <button data-v="initials">Badge only</button>
+      <button data-v="auto" class="sel">Photo if set</button>
+      <button data-v="initials">Nickname only</button>
       <button data-v="none">No badge</button>
     </div>
     <div class="field" style="margin-top:8px;">
       <label>Badge text (nickname / initials)</label>
-      <input id="fNickname" placeholder="Auto from name — e.g. JW" maxlength="6">
+      <input id="fNickname" placeholder="Auto from name — e.g. JW" maxlength="12">
     </div>
+    <div class="sizehint" style="margin-top:-6px;">“Nickname only” always shows this text, even when a photo is attached. Leave it blank to use initials from the name.</div>
 
     <h4>Card layout</h4>
     <div class="seg" id="segLayout">
@@ -477,13 +536,28 @@ input[type=file]{display:none;}
       <button data-v="1.45" style="font-size:17px;">XL</button>
     </div>
 
-    <h4>Box width</h4>
+    <h4>Box size</h4>
     <div class="seg" id="segWidth">
       <button data-v="140">Narrow</button>
       <button data-v="168" class="sel">Normal</button>
       <button data-v="210">Wide</button>
       <button data-v="260">X-Wide</button>
     </div>
+    <div class="sizerow" id="widthRow">
+      <label for="fWidth">Width</label>
+      <input type="range" id="fWidth" min="110" max="460" step="2" value="168">
+      <span class="val" id="fWidthVal">168 px</span>
+    </div>
+    <div class="seg" id="segHeightMode" style="margin-top:10px;">
+      <button data-v="auto" class="sel">Auto height</button>
+      <button data-v="fixed">Set height</button>
+    </div>
+    <div class="sizerow off" id="heightRow">
+      <label for="fHeight">Height</label>
+      <input type="range" id="fHeight" min="56" max="420" step="2" value="96">
+      <span class="val" id="fHeightVal">Auto</span>
+    </div>
+    <div class="sizehint" id="sizeHint">Or drag the square grip at a box’s bottom-right corner to resize it right on the canvas.</div>
 
     <h4>Shape</h4>
     <div class="seg" id="segShape">

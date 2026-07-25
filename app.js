@@ -7,6 +7,7 @@
   var NODE_W = 168;            // default box width; each box may override it
   var NODE_H_APPROX = 96;
   var BOX_WIDTHS = [140, 168, 210, 260];
+  var MIN_W = 110, MAX_W = 460, MIN_H = 56, MAX_H = 420;
   var FONT_SCALES = [0.85, 1, 1.2, 1.45];
   var AVATAR_SIZES = { 0.85: 38, 1: 44, 1.2: 52, 1.45: 62 };
   var SIB_GAP = 30;
@@ -129,6 +130,8 @@
       if (!n.align) n.align = (n.layout === 'row') ? 'left' : 'center';
       if (!n.fontScale) n.fontScale = 1;
       if (!n.width) n.width = NODE_W;
+      // 0 / absent means "let the content decide"; a number is an explicit height.
+      if (!n.height) n.height = 0;
     });
     delete c.settings;
     delete c.autoLayout;
@@ -360,6 +363,11 @@
   // Per-box overrides, with back-compatible defaults for older saved charts.
   function nodeW(n) { return (n && n.width) || NODE_W; }
   function nodeScale(n) { return (n && n.fontScale) || 1; }
+  function isFixedAspect(n) { var s = n && n.shape; return s === 'circle' || s === 'square'; }
+  // The height a box is *forced* to, or 0 when it should size to its content.
+  // Circles and squares always mirror their width.
+  function forcedH(n) { return isFixedAspect(n) ? nodeW(n) : ((n && n.height) || 0); }
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
   function initials(name) {
     var parts = (name || '').trim().split(/\s+/).filter(Boolean);
@@ -384,6 +392,11 @@
   function showsPhoto(n) {
     return !!n.photo && (n.avatarMode || 'auto') === 'auto';
   }
+  // Anything longer than plain initials gets a pill-shaped badge, so a
+  // nickname stays legible instead of shrinking to fit a small circle.
+  function badgeIsPill(n) {
+    return !showsPhoto(n) && badgeText(n).length > 3;
+  }
 
   function applyChartVars() {
     var chart = getActiveChart();
@@ -402,18 +415,25 @@
     el.dataset.align = n.align || 'center';
     var w = nodeW(n);
     var fs = nodeScale(n);
+    var fh = forcedH(n);
     el.style.width = w + 'px';
-    el.style.height = (n.shape === 'circle' || n.shape === 'square') ? w + 'px' : '';
+    el.style.height = fh ? fh + 'px' : '';
+    el.dataset.fixedh = (fh && !isFixedAspect(n)) ? '1' : '0';
     el.style.padding = Math.round(10 * fs) + 'px ' + Math.round(12 * fs) + 'px';
     var av = el.querySelector('.avatar');
     var avSize = AVATAR_SIZES[fs] || Math.round(44 * fs);
     av.style.width = avSize + 'px';
     av.style.height = avSize + 'px';
-    // Shrink the badge text when it's longer than plain initials so a
-    // nickname like "Jess" still sits comfortably inside the circle.
+    var pill = badgeIsPill(n);
+    av.classList.toggle('pill', pill);
+    // A short badge shrinks to fit its circle; a pill grows sideways instead,
+    // so the text keeps a readable size either way.
     var chars = showsPhoto(n) ? 2 : Math.max(1, badgeText(n).length);
-    var badgeFs = Math.min(15 * fs, (avSize * 0.86) / chars * 1.55);
+    var badgeFs = pill ? Math.min(14 * fs, avSize * 0.42)
+      : Math.min(15 * fs, (avSize * 0.86) / chars * 1.55);
     av.style.fontSize = badgeFs.toFixed(1) + 'px';
+    av.style.padding = pill ? '0 ' + Math.round(avSize * 0.28) + 'px' : '0 2px';
+    av.style.minWidth = pill ? avSize + 'px' : '';
     av.style.display = showsAvatar(n) ? 'flex' : 'none';
     el.querySelector('.nname').style.fontSize = (14.5 * fs).toFixed(1) + 'px';
     el.querySelector('.ntitle').style.fontSize = (12 * fs).toFixed(1) + 'px';
@@ -455,7 +475,8 @@
           '<div class="avatar"></div>' +
           '<div class="ntext"><div class="nname"></div><div class="ntitle"></div><div class="ndetail"></div></div>' +
           '<div class="handle n" data-dir="n"></div><div class="handle s" data-dir="s"></div>' +
-          '<div class="handle e" data-dir="e"></div><div class="handle w" data-dir="w"></div>';
+          '<div class="handle e" data-dir="e"></div><div class="handle w" data-dir="w"></div>' +
+          '<div class="szgrip"></div>';
         canvas.appendChild(el);
         nodeEls[id] = el;
         wireNodeEvents(el);
@@ -788,6 +809,61 @@
   function wireNodeEvents(el) {
     el.addEventListener('pointerdown', onNodeDown);
     el.querySelectorAll('.handle').forEach(function (h) { h.addEventListener('pointerdown', onHandleDown); });
+    el.querySelector('.szgrip').addEventListener('pointerdown', onResizeDown);
+  }
+
+  // Live size readout while dragging a grip, so you can hit a number exactly.
+  var sizeReadout = $('sizeReadout');
+  function showSize(w, h) {
+    sizeReadout.textContent = Math.round(w) + ' × ' + (h ? Math.round(h) : 'auto');
+    sizeReadout.classList.add('show');
+  }
+  function hideSize() { sizeReadout.classList.remove('show'); }
+
+  // Drag the corner grip to resize. Circles and squares stay square; every
+  // other shape gets an explicit width and height from the drag.
+  function onResizeDown(e) {
+    e.stopPropagation();
+    var grip = e.currentTarget;
+    var el = grip.closest('.node');
+    var id = el.dataset.id;
+    var n = getActiveChart().nodes[id];
+    if (!n) return;
+    try { grip.setPointerCapture(e.pointerId); } catch (err) {}
+    var sx = e.clientX, sy = e.clientY;
+    var ow = nodeW(n), oh = el.offsetHeight || NODE_H_APPROX;
+    var square = isFixedAspect(n);
+    var moved = false, preSnap = null;
+
+    function mv(ev) {
+      var dx = (ev.clientX - sx) / scale, dy = (ev.clientY - sy) / scale;
+      if (!moved) {
+        if (Math.abs(ev.clientX - sx) < 4 && Math.abs(ev.clientY - sy) < 4) return;
+        moved = true; preSnap = snapshot(); el.classList.add('resizing');
+      }
+      if (square) {
+        // One dimension drives both — take whichever the finger moved more.
+        n.width = clamp(Math.round((ow + (Math.abs(dx) > Math.abs(dy) ? dx : dy)) / 2) * 2, MIN_W, MAX_W);
+        n.height = 0;
+      } else {
+        n.width = clamp(Math.round((ow + dx) / 2) * 2, MIN_W, MAX_W);
+        n.height = clamp(Math.round((oh + dy) / 2) * 2, MIN_H, MAX_H);
+      }
+      applyNodeStyle(el, n);
+      showSize(nodeW(n), forcedH(n));
+      drawEdges();
+    }
+    function up() {
+      grip.removeEventListener('pointermove', mv);
+      grip.removeEventListener('pointerup', up);
+      grip.removeEventListener('pointercancel', up);
+      el.classList.remove('resizing');
+      hideSize();
+      if (moved) { commitUndo(preSnap); saveState(); render(); }
+    }
+    grip.addEventListener('pointermove', mv);
+    grip.addEventListener('pointerup', up);
+    grip.addEventListener('pointercancel', up);
   }
 
   function clientToCanvas(clientX, clientY) {
@@ -869,7 +945,7 @@
   }
 
   function onNodeDown(e) {
-    if (e.target.closest('.handle')) return;
+    if (e.target.closest('.handle, .szgrip')) return;
     e.stopPropagation();
     var el = e.currentTarget;
     var id = el.dataset.id;
@@ -1088,7 +1164,7 @@
     chart.nodes[id] = {
       id: id, name: '', title: '', detail: '', nickname: '', photo: null, x: x, y: y,
       shape: 'rounded', color: randomColor(), fill: defaultFill(), border: defaultBorder(),
-      font: '', textColor: '', avatarMode: (chart.badges === 'hide' ? 'none' : 'auto'), layout: 'stack', align: 'center', fontScale: 1, width: NODE_W, order: Date.now()
+      font: '', textColor: '', avatarMode: (chart.badges === 'hide' ? 'none' : 'auto'), layout: 'stack', align: 'center', fontScale: 1, width: NODE_W, height: 0, order: Date.now()
     };
     return id;
   }
@@ -1277,24 +1353,71 @@
 
   function refreshPhotoPreview(n) {
     pendingPhoto = n.photo || null;
-    if (pendingPhoto) { photoPreview.style.background = "center/cover no-repeat url('" + pendingPhoto + "')"; photoPreview.textContent = ''; }
-    else { photoPreview.style.background = n.color || COLOR_SWATCHES[0]; photoPreview.textContent = badgeText(n); }
+    drawBadgePreview();
+  }
+  // The preview mirrors what the card will actually show, which depends on
+  // the badge mode as well as the photo — "Nickname only" has to hide an
+  // attached photo here too, or typing a nickname looks like it does nothing.
+  function drawBadgePreview() {
+    var mode = segValue($('segAvatar'));
+    var usePhoto = !!pendingPhoto && mode === 'auto';
+    photoPreview.classList.toggle('dimmed', mode === 'none');
+    if (usePhoto) {
+      photoPreview.style.background = "center/cover no-repeat url('" + pendingPhoto + "')";
+      photoPreview.textContent = '';
+    } else {
+      photoPreview.style.background = (colorPicker && colorPicker.dataset.value) || COLOR_SWATCHES[0];
+      photoPreview.textContent = $('fNickname').value.trim() || initials(fName.value);
+    }
   }
   // Live-preview the badge text as it's typed.
-  $('fNickname').addEventListener('input', function () {
-    if (pendingPhoto) return;
-    photoPreview.textContent = $('fNickname').value.trim() || initials(fName.value);
-  });
-  fName.addEventListener('input', function () {
-    if (pendingPhoto || $('fNickname').value.trim()) return;
-    photoPreview.textContent = initials(fName.value);
-  });
+  $('fNickname').addEventListener('input', drawBadgePreview);
+  fName.addEventListener('input', drawBadgePreview);
 
   function updateFillPickerVisibility() {
     var t = segValue(segFillType);
     fillColor2Picker.style.display = t === 'gradient' ? 'flex' : 'none';
     fillTextureGrid.style.display = t === 'texture' ? 'flex' : 'none';
   }
+
+  // ---------------------------------------------------------------------
+  // Box size controls: preset buttons, a width slider and an optional
+  // explicit height. The three stay in sync — moving a slider clears the
+  // preset selection, tapping a preset moves the slider.
+  // ---------------------------------------------------------------------
+  var fWidth = $('fWidth'), fHeight = $('fHeight');
+  var fWidthVal = $('fWidthVal'), fHeightVal = $('fHeightVal');
+  var segWidth = $('segWidth'), segHeightMode = $('segHeightMode'), heightRow = $('heightRow');
+
+  function paintSizeVals() {
+    var fixed = segValue(segHeightMode) === 'fixed';
+    fWidthVal.textContent = fWidth.value + ' px';
+    fHeightVal.textContent = fixed ? fHeight.value + ' px' : 'Auto';
+    heightRow.classList.toggle('off', !fixed);
+    segWidth.querySelectorAll('button').forEach(function (b) {
+      b.classList.toggle('sel', b.dataset.v === fWidth.value);
+    });
+  }
+  // Circles and squares are always as tall as they are wide, so the height
+  // control would be a lie for them.
+  function syncSizeForShape() {
+    var sq = segValue(segShape) === 'circle' || segValue(segShape) === 'square';
+    segHeightMode.classList.toggle('off', sq);
+    segHeightMode.style.opacity = sq ? '.38' : '';
+    segHeightMode.style.pointerEvents = sq ? 'none' : '';
+    if (sq) { heightRow.classList.add('off'); fHeightVal.textContent = 'Same as width'; }
+    else paintSizeVals();
+  }
+  function setSizeControls(n) {
+    fWidth.value = String(clamp(nodeW(n), MIN_W, MAX_W));
+    var h = n.height || 0;
+    wireSeg(segHeightMode, h ? 'fixed' : 'auto', paintSizeVals);
+    fHeight.value = String(clamp(h || NODE_H_APPROX, MIN_H, MAX_H));
+    wireSeg(segWidth, String(n.width || NODE_W), function (v) { fWidth.value = v; paintSizeVals(); });
+    paintSizeVals();
+  }
+  fWidth.addEventListener('input', paintSizeVals);
+  fHeight.addEventListener('input', paintSizeVals);
 
   function openEditSheet(id, focusEmpty) {
     editingId = id;
@@ -1306,14 +1429,17 @@
     $('fDetail').value = n.detail || '';
     $('fNickname').value = n.nickname || '';
     $('fNickname').placeholder = 'Auto from name — e.g. ' + initials(n.name || 'Jane Wilson');
+    // The badge mode and accent colour both feed the preview, so settle them
+    // before drawing it.
+    wireSeg($('segAvatar'), n.avatarMode || 'auto', drawBadgePreview);
+    buildColorRow(colorPicker, n.color || COLOR_SWATCHES[0], drawBadgePreview);
     refreshPhotoPreview(n);
-    wireSeg($('segAvatar'), n.avatarMode || 'auto');
     wireSeg($('segLayout'), n.layout || 'stack');
     wireSeg($('segAlign'), n.align || 'center');
     wireSeg($('segFontScale'), String(n.fontScale || 1));
-    wireSeg($('segWidth'), String(n.width || NODE_W));
-    wireSeg(segShape, n.shape || 'rounded');
-    buildColorRow(colorPicker, n.color || COLOR_SWATCHES[0]);
+    setSizeControls(n);
+    wireSeg(segShape, n.shape || 'rounded', syncSizeForShape);
+    syncSizeForShape();
     var fill = n.fill || defaultFill();
     wireSeg(segFillType, fill.type, updateFillPickerVisibility);
     buildColorRow(fillColorPicker, fill.color || '', null, true);
@@ -1346,7 +1472,9 @@
     n.layout = segValue($('segLayout'));
     n.align = segValue($('segAlign'));
     n.fontScale = parseFloat(segValue($('segFontScale')));
-    n.width = parseInt(segValue($('segWidth')), 10);
+    n.width = clamp(parseInt(fWidth.value, 10) || NODE_W, MIN_W, MAX_W);
+    n.height = segValue(segHeightMode) === 'fixed'
+      ? clamp(parseInt(fHeight.value, 10) || NODE_H_APPROX, MIN_H, MAX_H) : 0;
     n.shape = segValue(segShape);
     n.color = colorPicker.dataset.value;
     n.fill = { type: segValue(segFillType), color: fillColorPicker.dataset.value, color2: fillColor2Picker.dataset.value, texture: fillTextureGrid.dataset.value };
@@ -1383,7 +1511,7 @@
   var APPLY_GROUPS = [
     { key: 'shape', label: 'Shape & card layout', sub: 'Shape, stacked/compact, and text alignment', props: ['shape', 'layout', 'align'] },
     { key: 'colors', label: 'Colours', sub: 'Fill, border, text and badge colour', props: ['fill', 'border', 'textColor', 'color'] },
-    { key: 'size', label: 'Text size & box width', sub: 'Makes every card a consistent size', props: ['fontScale', 'width'] },
+    { key: 'size', label: 'Text size & box size', sub: 'Makes every card a consistent size', props: ['fontScale', 'width', 'height'] },
     { key: 'font', label: 'Font', sub: 'This box’s typeface override', props: ['font'] },
     { key: 'badge', label: 'Badge visibility', sub: 'Photo/badge, badge only, or hidden', props: ['avatarMode'] }
   ];
@@ -1923,9 +2051,17 @@
       pushUndo();
       var c = getActiveChart();
       c.badges = v;
-      // Apply to every existing box so one switch clears them all.
+      // Apply to every existing box so one switch clears them all. Showing
+      // badges again restores each card's own mode rather than forcing
+      // "photo", so a box set to nickname-only keeps its nickname.
       Object.keys(c.nodes).forEach(function (id) {
-        c.nodes[id].avatarMode = (v === 'hide') ? 'none' : 'auto';
+        var node = c.nodes[id];
+        if (v === 'hide') {
+          if (node.avatarMode !== 'none') node.prevAvatarMode = node.avatarMode;
+          node.avatarMode = 'none';
+        } else {
+          node.avatarMode = node.prevAvatarMode || 'auto';
+        }
       });
       saveState();
       render();
@@ -2467,7 +2603,10 @@
       var shape = n.shape || 'rounded';
       var W = nodeW(n), fs = nodeScale(n);
       var fixedAspect = (shape === 'circle' || shape === 'square');
-      var boxH = fixedAspect ? W : h;
+      var boxH = fixedAspect ? W : (n.height || h);
+      // Both a fixed-aspect shape and an explicit height centre their content
+      // vertically, matching what the card does on screen.
+      var centreV = fixedAspect || !!n.height;
       var rx = shape === 'rect' ? 3 : (shape === 'pill' ? boxH / 2 : (shape === 'circle' ? W / 2 : (shape === 'square' ? 6 : 14)));
       var fill = n.fill || defaultFill();
       var fillAttr;
@@ -2489,12 +2628,24 @@
       var padT = 10 * fs, padL = 12 * fs;
       var avR = (AVATAR_SIZES[fs] || 44 * fs) / 2;
       var hasAvatar = showsAvatar(n);
+      var nameFont = (n.font ? FONT_STACKS[n.font] : fontFamily).replace(/"/g, "'");
+
+      // Badge metrics. A nickname longer than initials becomes a pill that
+      // grows sideways, so its width has to be known before anything is laid
+      // out around it. Mirrors the CSS in applyNodeStyle.
+      var badgeStr = badgeText(n);
+      var isPill = badgeIsPill(n);
+      var badgeSize = isPill ? Math.min(14 * fs, avR * 0.84)
+        : Math.min(15 * fs, (avR * 1.75) / Math.max(1, badgeStr.length) * 1.6);
+      var badgeW = isPill
+        ? Math.max(avR * 2, measureTextWidth(badgeStr, badgeSize, true, nameFont) + avR * 1.12)
+        : avR * 2;
 
       // Horizontal placement of the text block, honouring the alignment
       // setting. In compact mode the text sits to the right of the badge.
       var textLeft, innerW;
       if (isRow) {
-        textLeft = x + padL + (hasAvatar ? avR * 2 + 10 : 0);
+        textLeft = x + padL + (hasAvatar ? badgeW + 10 : 0);
         innerW = W - (textLeft - x) - padL;
       } else {
         textLeft = x + 10 * fs;
@@ -2505,14 +2656,13 @@
         : (align === 'right' ? textLeft + innerW : textLeft + innerW / 2);
       // The badge follows the alignment in stacked mode so the card reads as
       // one aligned block; in compact mode it always leads on the left.
-      var cx = isRow ? x + padL + avR
-        : (align === 'left' ? x + 10 * fs + avR
-          : (align === 'right' ? x + W - 10 * fs - avR : x + W / 2));
+      var cx = isRow ? x + padL + badgeW / 2
+        : (align === 'left' ? x + 10 * fs + badgeW / 2
+          : (align === 'right' ? x + W - 10 * fs - badgeW / 2 : x + W / 2));
 
       var tcx = textColorsFor(n);
       var nameColor = tcx.name || textColorDefault;
       var titleColor = tcx.title || mutedColor;
-      var nameFont = (n.font ? FONT_STACKS[n.font] : fontFamily).replace(/"/g, "'");
       var nameSize = 14.5 * fs, titleSize = 12 * fs, detailSize = 11 * fs;
       // Wrap rather than truncate, so the exported chart matches the screen.
       var nameLines = wrapSvgText(n.name || 'Unnamed', innerW, nameSize, true, nameFont);
@@ -2529,7 +2679,7 @@
       if (isRow) {
         avatarCy = y + boxH / 2;
         cursorY = y + boxH / 2 - textBlockH / 2;
-      } else if (fixedAspect) {
+      } else if (centreV) {
         var wholeH = (hasAvatar ? avR * 2 + 6 * fs : 0) + textBlockH;
         var blockTop = y + boxH / 2 - wholeH / 2;
         avatarCy = blockTop + avR;
@@ -2545,11 +2695,12 @@
           defs.push('<clipPath id="' + clipId + '"><circle cx="' + cx + '" cy="' + avatarCy + '" r="' + avR + '"/></clipPath>');
           parts.push('<image href="' + n.photo + '" x="' + (cx - avR) + '" y="' + (avatarCy - avR) + '" width="' + (avR * 2) + '" height="' + (avR * 2) + '" clip-path="url(#' + clipId + ')" preserveAspectRatio="xMidYMid slice"/>');
         } else {
-          var badge = badgeText(n);
-          // Shrink the badge text if it's longer than plain initials.
-          var badgeSize = Math.min(15 * fs, (avR * 1.75) / Math.max(1, badge.length) * 1.6);
-          parts.push('<circle cx="' + cx + '" cy="' + avatarCy + '" r="' + avR + '" fill="' + accent + '"/>');
-          parts.push('<text x="' + cx + '" y="' + (avatarCy + badgeSize * 0.35) + '" font-family="' + nameFont + '" font-size="' + badgeSize.toFixed(1) + '" font-weight="700" fill="#fff" text-anchor="middle">' + escapeHtml(badge) + '</text>');
+          if (isPill) {
+            parts.push('<rect x="' + (cx - badgeW / 2) + '" y="' + (avatarCy - avR) + '" width="' + badgeW + '" height="' + (avR * 2) + '" rx="' + avR + '" fill="' + accent + '"/>');
+          } else {
+            parts.push('<circle cx="' + cx + '" cy="' + avatarCy + '" r="' + avR + '" fill="' + accent + '"/>');
+          }
+          parts.push('<text x="' + cx + '" y="' + (avatarCy + badgeSize * 0.35) + '" font-family="' + nameFont + '" font-size="' + badgeSize.toFixed(1) + '" font-weight="700" fill="#fff" text-anchor="middle">' + escapeHtml(badgeStr) + '</text>');
         }
       }
 
