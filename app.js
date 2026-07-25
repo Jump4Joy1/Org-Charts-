@@ -8,6 +8,7 @@
   var NODE_H_APPROX = 96;
   var BOX_WIDTHS = [140, 168, 210, 260];
   var MIN_W = 110, MAX_W = 460, MIN_H = 56, MAX_H = 420;
+  var MIN_FS = 0.6, MAX_FS = 2.6;
   var FONT_SCALES = [0.85, 1, 1.2, 1.45];
   var AVATAR_SIZES = { 0.85: 38, 1: 44, 1.2: 52, 1.45: 62 };
   var SIB_GAP = 30;
@@ -95,7 +96,25 @@
     return { activeId: id, charts: {}, deleted: {} };
   }
 
-  function defaultFill() { return { type: 'solid', color: '', color2: '', texture: 'dots' }; }
+  function defaultFill() { return { type: 'solid', color: '', color2: '', texture: 'dots', angle: 135 }; }
+  function fillAngle(f) { return (f && typeof f.angle === 'number') ? f.angle : 135; }
+  // CSS angles run clockwise from 'up'; SVG needs a plain unit vector, so
+  // convert once and let both renderers share it.
+  function angleVector(deg) {
+    var r = (deg - 90) * Math.PI / 180;
+    var dx = Math.cos(r), dy = Math.sin(r);
+    return { x1: (0.5 - dx / 2), y1: (0.5 - dy / 2), x2: (0.5 + dx / 2), y2: (0.5 + dy / 2) };
+  }
+  var GRADIENT_PRESETS = [
+    { name: 'Slate', a: '#4b5b70', b: '#7d8ea6', angle: 135 },
+    { name: 'Ocean', a: '#1f6feb', b: '#4fc3f7', angle: 135 },
+    { name: 'Forest', a: '#1f7a4d', b: '#7bc47f', angle: 135 },
+    { name: 'Sunset', a: '#c2410c', b: '#f5b451', angle: 120 },
+    { name: 'Berry', a: '#7b2d8b', b: '#d46fb0', angle: 135 },
+    { name: 'Clay', a: '#8a5a3b', b: '#d9b08c', angle: 150 },
+    { name: 'Steel', a: '#334155', b: '#94a3b8', angle: 180 },
+    { name: 'Mist', a: '#dfe6f2', b: '#f7fafc', angle: 160 }
+  ];
   function defaultBorder() { return { color: '', width: 1, dash: 'solid' }; }
   function defaultBackground() { return { type: 'solid', color: '', color2: '', texture: 'dots' }; }
 
@@ -822,7 +841,7 @@
     el.querySelector('.ntitle').style.fontSize = (12 * fs).toFixed(1) + 'px';
     el.querySelector('.ndetail').style.fontSize = (11 * fs).toFixed(1) + 'px';
     var fill = n.fill || defaultFill();
-    if (fill.type === 'gradient') el.style.background = 'linear-gradient(135deg, ' + (fill.color || '#dfe6f2') + ', ' + (fill.color2 || '#c3d1ea') + ')';
+    if (fill.type === 'gradient') el.style.background = 'linear-gradient(' + fillAngle(fill) + 'deg, ' + (fill.color || '#dfe6f2') + ', ' + (fill.color2 || '#c3d1ea') + ')';
     else if (fill.type === 'texture') el.style.background = textureCss(fill.texture, fill.color || n.color || '#3568d4', 'var(--panel)');
     else el.style.background = fill.color || 'var(--panel)';
     var border = n.border || defaultBorder();
@@ -1759,8 +1778,36 @@
 
   function updateFillPickerVisibility() {
     var t = segValue(segFillType);
+    $('gradientBlock').style.display = t === 'gradient' ? 'block' : 'none';
     fillColor2Picker.style.display = t === 'gradient' ? 'flex' : 'none';
     fillTextureGrid.style.display = t === 'texture' ? 'flex' : 'none';
+  }
+
+  var fGradAngle = $('fGradAngle'), fGradAngleVal = $('fGradAngleVal');
+  function paintGradAngle() { fGradAngleVal.textContent = fGradAngle.value + '\u00b0'; }
+  fGradAngle.addEventListener('input', paintGradAngle);
+
+  // Preset blends fill in both colours and the angle in one tap; the pickers
+  // stay live afterwards so a preset is a starting point, not a lock-in.
+  function buildGradPresets(selA, selB) {
+    var box = $('gradPresets');
+    box.innerHTML = '';
+    GRADIENT_PRESETS.forEach(function (g) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'gradswatch' + ((selA === g.a && selB === g.b) ? ' sel' : '');
+      b.title = g.name;
+      b.style.background = 'linear-gradient(' + g.angle + 'deg, ' + g.a + ', ' + g.b + ')';
+      b.addEventListener('click', function () {
+        buildColorRow(fillColorPicker, g.a, null, true);
+        buildColorRow(fillColor2Picker, g.b);
+        fGradAngle.value = String(g.angle);
+        paintGradAngle();
+        box.querySelectorAll('.gradswatch').forEach(function (x) { x.classList.remove('sel'); });
+        b.classList.add('sel');
+      });
+      box.appendChild(b);
+    });
   }
 
   // ---------------------------------------------------------------------
@@ -1802,6 +1849,28 @@
   fWidth.addEventListener('input', paintSizeVals);
   fHeight.addEventListener('input', paintSizeVals);
 
+  // Text size: the four presets are shortcuts that move a continuous slider,
+  // the same arrangement the box-width control uses.
+  var fFontScale = $('fFontScale'), fFontScaleVal = $('fFontScaleVal');
+  var segFontScale = $('segFontScale');
+  function paintFontScale() {
+    var pct = parseInt(fFontScale.value, 10);
+    fFontScaleVal.textContent = pct + '%';
+    segFontScale.querySelectorAll('button').forEach(function (b) {
+      b.classList.toggle('sel', Math.round(parseFloat(b.dataset.v) * 100) === pct);
+    });
+  }
+  function setFontScaleControls(n) {
+    var pct = Math.round(clamp(nodeScale(n), MIN_FS, MAX_FS) * 100);
+    fFontScale.value = String(pct);
+    wireSeg(segFontScale, String(nodeScale(n)), function (v) {
+      fFontScale.value = String(Math.round(parseFloat(v) * 100));
+      paintFontScale();
+    });
+    paintFontScale();
+  }
+  fFontScale.addEventListener('input', paintFontScale);
+
   function openEditSheet(id, focusEmpty) {
     editingId = id;
     var chart = getActiveChart();
@@ -1819,7 +1888,7 @@
     refreshPhotoPreview(n);
     wireSeg($('segLayout'), n.layout || 'stack');
     wireSeg($('segAlign'), n.align || 'center');
-    wireSeg($('segFontScale'), String(n.fontScale || 1));
+    setFontScaleControls(n);
     setSizeControls(n);
     wireSeg(segShape, n.shape || 'rounded', syncSizeForShape);
     syncSizeForShape();
@@ -1827,6 +1896,9 @@
     wireSeg(segFillType, fill.type, updateFillPickerVisibility);
     buildColorRow(fillColorPicker, fill.color || '', null, true);
     buildColorRow(fillColor2Picker, fill.color2 || '#c3d1ea');
+    fGradAngle.value = String(fillAngle(fill));
+    paintGradAngle();
+    buildGradPresets(fill.color, fill.color2);
     buildTextureGrid(fillTextureGrid, fill.texture || 'dots', fill.color || n.color);
     updateFillPickerVisibility();
     var border = n.border || defaultBorder();
@@ -1854,13 +1926,14 @@
     n.avatarMode = segValue($('segAvatar'));
     n.layout = segValue($('segLayout'));
     n.align = segValue($('segAlign'));
-    n.fontScale = parseFloat(segValue($('segFontScale')));
+    n.fontScale = clamp(parseInt(fFontScale.value, 10) / 100, MIN_FS, MAX_FS);
     n.width = clamp(parseInt(fWidth.value, 10) || NODE_W, MIN_W, MAX_W);
     n.height = segValue(segHeightMode) === 'fixed'
       ? clamp(parseInt(fHeight.value, 10) || NODE_H_APPROX, MIN_H, MAX_H) : 0;
     n.shape = segValue(segShape);
     n.color = colorPicker.dataset.value;
-    n.fill = { type: segValue(segFillType), color: fillColorPicker.dataset.value, color2: fillColor2Picker.dataset.value, texture: fillTextureGrid.dataset.value };
+    n.fill = { type: segValue(segFillType), color: fillColorPicker.dataset.value, color2: fillColor2Picker.dataset.value,
+      texture: fillTextureGrid.dataset.value, angle: parseInt(fGradAngle.value, 10) };
     n.border = { color: borderColorPicker.dataset.value, width: parseFloat(segValue(segBorderWidth)), dash: segValue(segBorderDash) };
     n.font = fFont.value;
     n.textColor = textColorPicker.dataset.value;
@@ -3065,7 +3138,10 @@
       var fillAttr;
       if (fill.type === 'gradient') {
         var gid = 'ng' + idx;
-        defs.push('<linearGradient id="' + gid + '" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="' + (fill.color || accent) + '"/><stop offset="1" stop-color="' + (fill.color2 || accent) + '"/></linearGradient>');
+        var gv = angleVector(fillAngle(fill));
+        defs.push('<linearGradient id="' + gid + '" x1="' + gv.x1 + '" y1="' + gv.y1 + '" x2="' + gv.x2 + '" y2="' + gv.y2 + '">'
+          + '<stop offset="0" stop-color="' + (fill.color || accent) + '"/>'
+          + '<stop offset="1" stop-color="' + (fill.color2 || accent) + '"/></linearGradient>');
         fillAttr = 'url(#' + gid + ')';
       } else if (fill.type === 'texture' && fill.texture !== 'none') {
         var tid = 'nt' + idx;

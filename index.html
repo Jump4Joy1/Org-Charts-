@@ -394,6 +394,9 @@ svg#guides{position:absolute; left:0; top:0; overflow:visible; pointer-events:no
 .sizerow input[type=range]::-moz-range-thumb{width:22px; height:22px; border-radius:50%; background:var(--panel); border:2px solid var(--accent);}
 .sizehint{font-size:11.5px; color:var(--muted); margin-top:8px; line-height:1.35;}
 
+.gradgrid{display:flex; gap:8px; margin-top:4px; flex-wrap:wrap;}
+.gradswatch{width:52px; height:34px; border-radius:8px; border:2px solid var(--line); flex:0 0 auto; padding:0;}
+.gradswatch.sel{border-color:var(--text);}
 .texturegrid{display:flex; gap:8px; margin-top:4px; flex-wrap:wrap;}
 .texswatch{width:44px; height:34px; border-radius:8px; border:2px solid var(--line); flex:0 0 auto;}
 .texswatch.sel{border-color:var(--accent);}
@@ -567,6 +570,11 @@ input[type=file]{display:none;}
       <button data-v="1.2" style="font-size:15px;">Large</button>
       <button data-v="1.45" style="font-size:17px;">XL</button>
     </div>
+    <div class="sizerow" id="fontScaleRow">
+      <label for="fFontScale">Size</label>
+      <input type="range" id="fFontScale" min="60" max="260" step="5" value="100">
+      <span class="val" id="fFontScaleVal">100%</span>
+    </div>
 
     <h4>Box size</h4>
     <div class="seg" id="segWidth">
@@ -626,7 +634,17 @@ input[type=file]{display:none;}
       <button data-v="texture">Texture</button>
     </div>
     <div class="colors" id="fillColorPicker" style="margin-top:8px;"></div>
-    <div class="colors" id="fillColor2Picker" style="margin-top:8px;display:none;"></div>
+    <div id="gradientBlock" style="display:none;">
+      <p class="smallmuted" style="margin:10px 0 2px;">Second colour</p>
+      <div class="colors" id="fillColor2Picker"></div>
+      <div class="sizerow" id="gradAngleRow">
+        <label for="fGradAngle">Angle</label>
+        <input type="range" id="fGradAngle" min="0" max="345" step="15" value="135">
+        <span class="val" id="fGradAngleVal">135°</span>
+      </div>
+      <p class="smallmuted" style="margin:8px 0 2px;">Ready-made blends</p>
+      <div class="gradgrid" id="gradPresets"></div>
+    </div>
     <div class="texturegrid" id="fillTextureGrid" style="display:none;"></div>
 
     <h4>Border</h4>
