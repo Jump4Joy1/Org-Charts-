@@ -441,6 +441,26 @@ svg#guides{position:absolute; left:0; top:0; overflow:visible; pointer-events:no
   border:1px solid var(--accent); background:var(--panel); color:var(--text);
 }
 .divider{height:1px; background:var(--line); margin:14px 0;}
+
+/* Sync status: a coloured dot beats a paragraph on a phone. */
+.syncdot{display:inline-block; width:9px; height:9px; border-radius:50%; background:var(--muted); vertical-align:middle; margin-right:2px;}
+.syncdot.ok{background:#2f9e6e;}
+.syncdot.syncing{background:#d99a2b;}
+.syncdot.error{background:var(--danger);}
+#syncStatusLine{display:flex; align-items:center; gap:8px; font-size:13.5px; font-weight:600; margin-bottom:4px;}
+#syncStatusDetail{font-size:12.5px; color:var(--muted); margin-bottom:10px; word-break:break-word;}
+.codebox{
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:14px; letter-spacing:.02em;
+  background:var(--panel2); border-radius:10px; padding:11px 12px; word-break:break-all; user-select:all;
+}
+.setupsteps{font-size:13px; color:var(--text); line-height:1.5; margin:6px 0 0; padding-left:20px;}
+.setupsteps li{margin-bottom:7px;}
+.setupsteps code{background:var(--panel2); border-radius:4px; padding:1px 5px; font-size:12px; word-break:break-all;}
+.sqlbox{
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px; line-height:1.45;
+  background:var(--panel2); border-radius:10px; padding:10px 11px; max-height:180px; overflow:auto;
+  white-space:pre; margin-top:8px;
+}
 .smallmuted{font-size:12.5px; color:var(--muted); margin-top:4px;}
 #toast{
   position:absolute; left:50%; bottom:calc(var(--safe-bottom) + 90px); transform:translateX(-50%) translateY(20px);
@@ -806,6 +826,9 @@ input[type=file]{display:none;}
       <button class="btn secondary" id="designOpenBtn">🎨 Chart style</button>
       <button class="btn secondary" id="exportOpenBtn">⭳ Export &amp; share</button>
     </div>
+    <div class="btnrow">
+      <button class="btn secondary" id="syncOpenBtn" style="flex:1;"><span class="syncdot" id="menuSyncDot"></span> <span id="menuSyncLabel">Sync across devices</span></button>
+    </div>
     <p class="smallmuted">Everything saves automatically as you work — there’s no save button. <b>Save a copy</b> snapshots a chart so you can rearrange the original and still have the old layout.</p>
     <p class="smallmuted">Charts are stored only on this device. Use Export JSON to back up or send a chart to another phone; Import JSON to bring one in. Add this app to your Home Screen so iOS keeps the data long-term.</p>
     <button class="btn ghost" id="menuCloseBtn" style="margin-top:6px;">Close</button>
@@ -914,6 +937,53 @@ input[type=file]{display:none;}
     </div>
     <p class="smallmuted">PDF opens the print sheet — choose "Save to Files" or "Save as PDF" to keep a crisp vector copy. SVG is a scalable vector file you can open or edit elsewhere.</p>
     <button class="btn ghost" id="exportCloseBtn" style="margin-top:6px;">Close</button>
+  </div>
+</div>
+
+<!-- Sync sheet -->
+<div class="sheet-backdrop" id="syncBackdrop">
+  <div class="sheet" id="syncSheet">
+    <div class="sheet-handle"></div>
+    <h3>Sync across devices</h3>
+    <div id="syncStatusLine"><span class="syncdot" id="syncDot"></span><span id="syncStatusText">Not set up</span></div>
+    <div id="syncStatusDetail"></div>
+
+    <h4>Sync code</h4>
+    <p class="smallmuted" style="margin-top:0;">This code is the key to your charts. Use the <b>same code on every device</b>. Anyone who has it can read and change your charts, so don’t post it publicly.</p>
+    <div class="field" style="margin-top:8px;">
+      <input id="syncCode" placeholder="paste your code, or generate one" autocapitalize="off" autocorrect="off" spellcheck="false">
+    </div>
+    <div class="btnrow" style="margin-top:0;">
+      <button class="btn secondary" id="syncGenBtn">Generate code</button>
+      <button class="btn secondary" id="syncCopyBtn">Copy code</button>
+    </div>
+
+    <h4>Your Supabase project</h4>
+    <div class="field"><label>Project URL</label><input id="syncUrl" placeholder="https://abcdefg.supabase.co" autocapitalize="off" autocorrect="off" spellcheck="false"></div>
+    <div class="field"><label>Anon public key</label><input id="syncKey" placeholder="eyJhbGciOi…" autocapitalize="off" autocorrect="off" spellcheck="false"></div>
+
+    <div class="btnrow">
+      <button class="btn" id="syncConnectBtn">Connect &amp; sync</button>
+      <button class="btn secondary" id="syncNowBtn">Sync now</button>
+    </div>
+    <div class="btnrow">
+      <button class="btn secondary" id="syncOffBtn" style="flex:1;">Turn sync off on this device</button>
+    </div>
+
+    <div class="divider"></div>
+    <h4>One-time setup</h4>
+    <p class="smallmuted" style="margin-top:0;">Do this once, on either device. It’s free and needs no card.</p>
+    <ol class="setupsteps">
+      <li>Go to <code>supabase.com</code>, sign up, and create a new project. Wait for it to finish provisioning.</li>
+      <li>Open <b>SQL Editor</b> in the left sidebar, paste the block below, and hit Run.</li>
+      <li>Open <b>Project Settings → API</b>. Copy the <b>Project URL</b> and the <b>anon public</b> key into the two fields above.</li>
+      <li>Tap <b>Generate code</b>, then <b>Connect &amp; sync</b>.</li>
+      <li>On your other device, open this app, paste the <b>same</b> sync code, URL and key, and tap Connect.</li>
+    </ol>
+    <button class="btn secondary" id="syncSqlCopyBtn" style="margin-top:10px;">Copy the SQL</button>
+    <div class="sqlbox" id="syncSqlBox"></div>
+    <p class="smallmuted">Your charts are stored in your own Supabase project — not mine, and not on any server I control. Turning sync off here leaves this device’s charts untouched.</p>
+    <button class="btn ghost" id="syncCloseBtn" style="margin-top:6px;">Close</button>
   </div>
 </div>
 

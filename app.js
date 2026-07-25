@@ -92,7 +92,7 @@
       }
     } catch (e2) {}
     var id = uid();
-    return { activeId: id, charts: {} };
+    return { activeId: id, charts: {}, deleted: {} };
   }
 
   function defaultFill() { return { type: 'solid', color: '', color2: '', texture: 'dots' }; }
@@ -139,6 +139,9 @@
   }
 
   function ensureBootstrapChart() {
+    // Tombstones, so a delete on one device propagates instead of the chart
+    // being resurrected by the next pull from another device.
+    if (!state.deleted) state.deleted = {};
     if (Object.keys(state.charts).length === 0) {
       var id = state.activeId || uid();
       state.charts[id] = newChartObj(id, 'My Org Chart');
@@ -158,11 +161,15 @@
 
   var redoStack = [];
   var storageWarned = false;
-  function saveState() {
-    getActiveChart().updatedAt = Date.now();
+  // `quiet` writes to disk without restamping the active chart. Sync merges by
+  // updatedAt, so merely opening a chart must not make this device's copy look
+  // newer than a real edit made on another device.
+  function saveState(quiet) {
+    if (!quiet) getActiveChart().updatedAt = Date.now();
     try {
       localStorage.setItem(STORE_KEY, JSON.stringify(state));
       storageWarned = false;
+      scheduleSyncPush();
       return true;
     } catch (e) {
       // Storage is full (photos are the usual culprit). Keep the in-memory
@@ -179,6 +186,382 @@
   }
 
   function getActiveChart() { return state.charts[state.activeId]; }
+
+  // =====================================================================
+  // Cloud sync (optional)
+  //
+  // The app stays offline-first: localStorage is always the truth for this
+  // device, and every feature works with sync switched off. Sync mirrors
+  // whole charts through a Supabase project the user owns, merging by
+  // last-write-wins on each chart's updatedAt stamp.
+  //
+  // Only two security-definer functions are exposed to the anon key, and
+  // both require the sync code, so the key on its own cannot read or write
+  // anybody's charts. The sync code is the actual secret.
+  // =====================================================================
+  var SYNC_KEY = 'orgchart.sync';
+  var SYNC_POLL_MS = 20000;      // background pull cadence while the app is open
+  var SYNC_DEBOUNCE_MS = 1200;   // settle time after an edit before pushing
+
+  function defaultSyncCfg() { return { url: '', key: '', space: '', pushed: {}, lastPull: 0 }; }
+  function loadSyncCfg() {
+    try {
+      var raw = localStorage.getItem(SYNC_KEY);
+      if (raw) {
+        var c = JSON.parse(raw);
+        if (!c.pushed) c.pushed = {};
+        return c;
+      }
+    } catch (e) {}
+    return defaultSyncCfg();
+  }
+  // Kept out of the chart store on purpose: exporting a chart must never
+  // hand somebody your sync code.
+  function saveSyncCfg() {
+    try { localStorage.setItem(SYNC_KEY, JSON.stringify(syncCfg)); } catch (e) {}
+  }
+  var syncCfg = loadSyncCfg();
+  var syncState = { status: 'off', detail: '', lastOk: 0, busy: false, pending: false };
+  var syncListeners = [];
+  function onSyncChange(fn) { syncListeners.push(fn); }
+  function setSyncStatus(status, detail) {
+    syncState.status = status;
+    syncState.detail = detail || '';
+    syncListeners.forEach(function (fn) { try { fn(); } catch (e) {} });
+  }
+  function syncEnabled() { return !!(syncCfg.url && syncCfg.key && syncCfg.space); }
+  function newSyncCode() {
+    // 24 chars of randomness — this is the capability that guards the data,
+    // so it has to be unguessable, not memorable.
+    var abc = 'abcdefghjkmnpqrstuvwxyz23456789';
+    var out = '';
+    var buf = null;
+    try { buf = new Uint8Array(24); crypto.getRandomValues(buf); } catch (e) {}
+    for (var i = 0; i < 24; i++) {
+      var r = buf ? buf[i] : Math.floor(Math.random() * 256);
+      out += abc[r % abc.length];
+      if (i % 6 === 5 && i < 23) out += '-';
+    }
+    return out;
+  }
+  function normalizeSyncCode(s) { return (s || '').trim().toLowerCase().replace(/[^a-z0-9-]/g, ''); }
+  function normalizeUrl(s) { return (s || '').trim().replace(/\/+$/, ''); }
+
+  function syncRpc(fn, body) {
+    var url = normalizeUrl(syncCfg.url) + '/rest/v1/rpc/' + fn;
+    return fetch(url, {
+      method: 'POST',
+      headers: {
+        'apikey': syncCfg.key,
+        'Authorization': 'Bearer ' + syncCfg.key,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify(body)
+    }).then(function (res) {
+      return res.text().then(function (text) {
+        if (!res.ok) {
+          var msg = 'HTTP ' + res.status;
+          try { var j = JSON.parse(text); msg = j.message || j.hint || msg; } catch (e) {}
+          if (res.status === 404) msg = 'Setup step missing — run the SQL in your Supabase project';
+          if (res.status === 401 || res.status === 403) msg = 'Project URL or key rejected';
+          throw new Error(msg);
+        }
+        try { return text ? JSON.parse(text) : null; } catch (e) { return null; }
+      });
+    });
+  }
+
+  // Charts this device has changed since the last successful push.
+  function dirtyChartIds() {
+    var out = [];
+    Object.keys(state.charts).forEach(function (id) {
+      var c = state.charts[id];
+      if (syncCfg.pushed[id] !== c.updatedAt) out.push(id);
+    });
+    Object.keys(state.deleted || {}).forEach(function (id) {
+      if (syncCfg.pushed[id] !== state.deleted[id]) out.push(id);
+    });
+    return out;
+  }
+
+  function syncPushOnce() {
+    var ids = dirtyChartIds();
+    if (!ids.length) return Promise.resolve(0);
+    var chain = Promise.resolve();
+    var done = 0;
+    ids.forEach(function (id) {
+      chain = chain.then(function () {
+        var chart = state.charts[id];
+        var isDel = !chart;
+        var stamp = isDel ? state.deleted[id] : chart.updatedAt;
+        return syncRpc('oc_push', {
+          p_space: syncCfg.space,
+          p_chart_id: id,
+          p_payload: isDel ? null : chart,
+          p_deleted: isDel,
+          p_updated_at: stamp
+        }).then(function () {
+          syncCfg.pushed[id] = stamp;
+          done++;
+        });
+      });
+    });
+    return chain.then(function () { saveSyncCfg(); return done; });
+  }
+
+  // Fold the server's rows into local state. Returns true if anything here
+  // actually changed, so the caller knows whether to re-render.
+  function mergeRemote(rows) {
+    var changed = false;
+    var activeTouched = false;
+    (rows || []).forEach(function (row) {
+      var id = row.chart_id;
+      var stamp = Number(row.updated_at) || 0;
+      var local = state.charts[id];
+      var localStamp = local ? local.updatedAt : (state.deleted[id] || 0);
+      // Ties go to the local copy: re-applying an identical remote row would
+      // just churn the render for nothing.
+      if (stamp <= localStamp) return;
+      if (row.deleted) {
+        if (local) {
+          delete state.charts[id];
+          state.deleted[id] = stamp;
+          changed = true;
+          if (state.activeId === id) activeTouched = true;
+        }
+      } else if (row.payload) {
+        var incoming = row.payload;
+        incoming.id = id;
+        incoming.updatedAt = stamp;
+        migrateChart(incoming);
+        state.charts[id] = incoming;
+        delete state.deleted[id];
+        changed = true;
+        if (state.activeId === id) activeTouched = true;
+      }
+      // Remote is now the newest thing we know about, so nothing to push back.
+      syncCfg.pushed[id] = stamp;
+    });
+    if (changed) {
+      if (!Object.keys(state.charts).length) ensureBootstrapChart();
+      if (!state.charts[state.activeId]) {
+        state.activeId = Object.keys(state.charts)[0];
+        activeTouched = true;
+      }
+      saveState(true);
+      saveSyncCfg();
+    }
+    return { changed: changed, activeTouched: activeTouched };
+  }
+
+  function syncNow(opts) {
+    opts = opts || {};
+    if (!syncEnabled()) return Promise.resolve(false);
+    if (syncState.busy) { syncState.pending = true; return Promise.resolve(false); }
+    syncState.busy = true;
+    setSyncStatus('syncing');
+    // Push first so this device's edits are on the server before the pull
+    // decides who wins.
+    return syncPushOnce()
+      .then(function () { return syncRpc('oc_pull', { p_space: syncCfg.space, p_since: 0 }); })
+      .then(function (rows) {
+        var res = mergeRemote(rows);
+        syncCfg.lastPull = Date.now();
+        saveSyncCfg();
+        syncState.lastOk = Date.now();
+        setSyncStatus('ok');
+        if (res.changed) {
+          render();
+          renderChartList();
+          if (res.activeTouched) fitToScreen();
+          if (!opts.silentToast) toast('Synced — chart updated from your other device');
+        } else if (opts.announce) {
+          toast('Synced');
+        }
+        return res.changed;
+      })
+      .catch(function (err) {
+        setSyncStatus('error', err && err.message ? err.message : 'Sync failed');
+        if (opts.announce) toast('Sync failed — ' + syncState.detail);
+        return false;
+      })
+      .then(function (r) {
+        syncState.busy = false;
+        if (syncState.pending) { syncState.pending = false; setTimeout(function () { syncNow({ silentToast: true }); }, 200); }
+        return r;
+      });
+  }
+
+  var syncPushTimer = null;
+  function scheduleSyncPush() {
+    if (!syncEnabled()) return;
+    // Nothing local has changed — a merge that just wrote to disk shouldn't
+    // bounce straight back into another round trip.
+    if (!dirtyChartIds().length) return;
+    clearTimeout(syncPushTimer);
+    syncPushTimer = setTimeout(function () { syncNow({ silentToast: true }); }, SYNC_DEBOUNCE_MS);
+  }
+
+  var syncPollTimer = null;
+  function startSyncLoop() {
+    clearInterval(syncPollTimer);
+    if (!syncEnabled()) { setSyncStatus('off'); return; }
+    syncPollTimer = setInterval(function () {
+      if (document.visibilityState === 'visible') syncNow({ silentToast: false });
+    }, SYNC_POLL_MS);
+  }
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') syncNow({ silentToast: false });
+  });
+  window.addEventListener('online', function () { syncNow({ silentToast: true }); });
+
+  // ---------------------------------------------------------------------
+  // Sync sheet
+  // ---------------------------------------------------------------------
+  var SYNC_SQL = [
+    'create table if not exists public.oc_charts (',
+    '  space      text   not null,',
+    '  chart_id   text   not null,',
+    '  payload    jsonb,',
+    '  deleted    boolean not null default false,',
+    '  updated_at bigint not null,',
+    '  primary key (space, chart_id)',
+    ');',
+    '',
+    'alter table public.oc_charts enable row level security;',
+    'revoke all on table public.oc_charts from anon, authenticated;',
+    '',
+    'create or replace function public.oc_pull(p_space text, p_since bigint default 0)',
+    'returns table (chart_id text, payload jsonb, deleted boolean, updated_at bigint)',
+    'language sql security definer set search_path = public as $$',
+    '  select c.chart_id, c.payload, c.deleted, c.updated_at',
+    '  from public.oc_charts c',
+    '  where c.space = p_space and length(p_space) >= 16',
+    '    and c.updated_at > coalesce(p_since, 0);',
+    '$$;',
+    '',
+    'create or replace function public.oc_push(',
+    '  p_space text, p_chart_id text, p_payload jsonb,',
+    '  p_deleted boolean, p_updated_at bigint',
+    ') returns bigint language plpgsql security definer set search_path = public as $$',
+    'declare v_existing bigint;',
+    'begin',
+    '  if length(p_space) < 16 then raise exception \'sync code too short\'; end if;',
+    '  select c.updated_at into v_existing from public.oc_charts c',
+    '   where c.space = p_space and c.chart_id = p_chart_id;',
+    '  if v_existing is not null and v_existing >= p_updated_at then',
+    '    return v_existing;',
+    '  end if;',
+    '  insert into public.oc_charts (space, chart_id, payload, deleted, updated_at)',
+    '  values (p_space, p_chart_id, p_payload, coalesce(p_deleted,false), p_updated_at)',
+    '  on conflict (space, chart_id) do update',
+    '    set payload = excluded.payload, deleted = excluded.deleted,',
+    '        updated_at = excluded.updated_at;',
+    '  return p_updated_at;',
+    'end; $$;',
+    '',
+    'grant execute on function public.oc_pull(text, bigint) to anon, authenticated;',
+    'grant execute on function public.oc_push(text, text, jsonb, boolean, bigint) to anon, authenticated;'
+  ].join('\n');
+
+  var syncBackdrop = $('syncBackdrop'), syncSheet = $('syncSheet');
+  function openSyncSheet() {
+    $('syncUrl').value = syncCfg.url || '';
+    $('syncKey').value = syncCfg.key || '';
+    $('syncCode').value = syncCfg.space || '';
+    $('syncSqlBox').textContent = SYNC_SQL;
+    refreshSyncUi();
+    syncBackdrop.classList.add('show');
+    syncSheet.classList.add('show');
+  }
+  function closeSyncSheet() { syncBackdrop.classList.remove('show'); syncSheet.classList.remove('show'); }
+
+  function agoText(ts) {
+    if (!ts) return '';
+    var s = Math.round((Date.now() - ts) / 1000);
+    if (s < 10) return 'just now';
+    if (s < 60) return s + 's ago';
+    if (s < 3600) return Math.round(s / 60) + ' min ago';
+    return Math.round(s / 3600) + ' h ago';
+  }
+  function refreshSyncUi() {
+    var dot = $('syncDot'), text = $('syncStatusText'), detail = $('syncStatusDetail');
+    var menuDot = $('menuSyncDot'), menuLabel = $('menuSyncLabel');
+    var cls = 'syncdot', label = 'Not set up', sub = 'Charts stay on this device only.';
+    if (!syncEnabled()) {
+      label = 'Off'; sub = 'Charts stay on this device only.';
+    } else if (syncState.status === 'error') {
+      cls += ' error'; label = 'Problem syncing'; sub = syncState.detail || 'Could not reach your project.';
+    } else if (syncState.status === 'syncing') {
+      cls += ' syncing'; label = 'Syncing…'; sub = '';
+    } else {
+      cls += ' ok'; label = 'On'; sub = syncState.lastOk ? 'Last synced ' + agoText(syncState.lastOk) : 'Waiting for first sync…';
+    }
+    if (dot) dot.className = cls;
+    if (text) text.textContent = label;
+    if (detail) detail.textContent = sub;
+    if (menuDot) menuDot.className = cls;
+    if (menuLabel) menuLabel.textContent = syncEnabled() ? ('Sync — ' + label.toLowerCase()) : 'Sync across devices';
+  }
+  onSyncChange(refreshSyncUi);
+  setInterval(function () { if (syncEnabled()) refreshSyncUi(); }, 15000);
+
+  $('syncOpenBtn').addEventListener('click', function () { closeMenu(); setTimeout(openSyncSheet, 120); });
+  $('syncCloseBtn').addEventListener('click', closeSyncSheet);
+  syncBackdrop.addEventListener('click', function (e) { if (e.target === syncBackdrop) closeSyncSheet(); });
+
+  $('syncGenBtn').addEventListener('click', function () {
+    if (syncCfg.space && !window.confirm('Replace the existing sync code?\n\nThis device will stop sharing charts with any device still using the old code.')) return;
+    $('syncCode').value = newSyncCode();
+    toast('New code generated — use it on every device');
+  });
+  function copyText(str, okMsg) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(str).then(function () { toast(okMsg); }).catch(function () { toast('Could not copy — select it by hand'); });
+    } else toast('Could not copy — select it by hand');
+  }
+  $('syncCopyBtn').addEventListener('click', function () {
+    var v = $('syncCode').value.trim();
+    if (!v) { toast('No code to copy'); return; }
+    copyText(v, 'Code copied');
+  });
+  $('syncSqlCopyBtn').addEventListener('click', function () { copyText(SYNC_SQL, 'SQL copied — paste it into Supabase'); });
+
+  $('syncConnectBtn').addEventListener('click', function () {
+    var url = normalizeUrl($('syncUrl').value);
+    var key = $('syncKey').value.trim();
+    var code = normalizeSyncCode($('syncCode').value);
+    if (!/^https?:\/\//.test(url)) { alert('The Project URL should start with https:// — copy it from Supabase → Project Settings → API.'); return; }
+    if (!key) { alert('Paste the anon public key from Supabase → Project Settings → API.'); return; }
+    if (code.replace(/-/g, '').length < 16) { alert('That sync code is too short. Tap "Generate code" to make one, then use the same code on your other device.'); return; }
+    syncCfg.url = url; syncCfg.key = key;
+    // A different code points at different data, so nothing already pushed
+    // under the old one should be assumed to be present under the new one.
+    if (syncCfg.space !== code) { syncCfg.space = code; syncCfg.pushed = {}; syncCfg.lastPull = 0; }
+    saveSyncCfg();
+    $('syncCode').value = code;
+    startSyncLoop();
+    setSyncStatus('syncing');
+    syncNow({ announce: false, silentToast: true }).then(function () {
+      refreshSyncUi();
+      if (syncState.status === 'error') alert('Sync could not connect:\n\n' + syncState.detail + '\n\nCheck the URL and key, and make sure you ran the SQL in your Supabase project.');
+      else toast('Sync is on');
+    });
+  });
+  $('syncNowBtn').addEventListener('click', function () {
+    if (!syncEnabled()) { toast('Set up sync first'); return; }
+    syncNow({ announce: true });
+  });
+  $('syncOffBtn').addEventListener('click', function () {
+    if (!window.confirm('Turn sync off on this device?\n\nYour charts stay here, and the copies on your other devices stay where they are.')) return;
+    syncCfg = defaultSyncCfg();
+    saveSyncCfg();
+    clearInterval(syncPollTimer);
+    setSyncStatus('off');
+    $('syncCode').value = ''; $('syncUrl').value = ''; $('syncKey').value = '';
+    toast('Sync turned off');
+  });
 
   function snapshot() { return JSON.stringify(state.charts[state.activeId]); }
   function pushUndo() {
@@ -1935,7 +2318,8 @@
           (canDelete ? '<button class="rowbtn danger" data-act="del">Delete</button>' : '') +
         '</div>';
 
-      function open() { state.activeId = c.id; saveState(); closeMenu(); render(); fitToScreen(); }
+      // Opening a chart isn't an edit, so it must not restamp it for sync.
+      function open() { state.activeId = c.id; saveState(true); closeMenu(); render(); fitToScreen(); }
       row.querySelector('[data-act="open"]').addEventListener('click', open);
       row.querySelector('[data-act="open2"]').addEventListener('click', open);
       row.querySelector('[data-act="copy"]').addEventListener('click', function () { duplicateChart(c.id); });
@@ -1973,8 +2357,11 @@
       if (delBtn) delBtn.addEventListener('click', function () {
         if (!window.confirm('Delete "' + c.name + '"? This cannot be undone.')) return;
         delete state.charts[c.id];
+        // Tombstone, so the delete travels to your other devices instead of
+        // the chart coming back on the next pull.
+        state.deleted[c.id] = Date.now();
         if (state.activeId === c.id) state.activeId = Object.keys(state.charts)[0];
-        saveState(); renderChartList(); render(); fitToScreen();
+        saveState(true); renderChartList(); render(); fitToScreen();
       });
       chartListEl.appendChild(row);
     });
@@ -2990,12 +3377,17 @@
   // Init
   // ---------------------------------------------------------------------
   ensureBootstrapChart();
-  saveState();
+  // Quiet: merely launching the app must not make this device's charts look
+  // newer than an edit waiting on the server.
+  saveState(true);
   try { localStorage.removeItem(OLD_STORE_KEY); } catch (e) {}
   render();
   requestAnimationFrame(function () { fitToScreen(); });
   applyTransform();
   window.addEventListener('resize', function () { fitToScreen(); });
+  refreshSyncUi();
+  startSyncLoop();
+  if (syncEnabled()) syncNow({ silentToast: true });
 
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () {}); });
