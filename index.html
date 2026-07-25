@@ -422,12 +422,24 @@ svg#guides{position:absolute; left:0; top:0; overflow:visible; pointer-events:no
 
 .linepreview{height:36px; display:flex; align-items:center; margin-bottom:6px;}
 
+/* Chart list rows stack on phones: the name is the tap target for opening,
+   with the actions on their own line so four of them still fit. */
 .listrow{
-  display:flex; align-items:center; gap:10px; padding:12px 4px; border-bottom:1px solid var(--line);
+  display:flex; flex-direction:column; gap:8px; padding:12px 4px; border-bottom:1px solid var(--line);
 }
-.listrow .lname{flex:1; font-size:15px; font-weight:600;}
-.listrow .lmeta{font-size:12px; color:var(--muted);}
-.listrow .rowbtn{padding:8px 10px; font-size:13px; border-radius:8px; border:none; background:var(--panel2); color:var(--text);}
+.listrow .lmain{display:flex; align-items:center; gap:10px; text-align:left; background:none; border:none; padding:0; width:100%; color:var(--text);}
+.listrow .lname{flex:1; font-size:15px; font-weight:600; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.listrow .lmeta{font-size:12px; color:var(--muted); flex:0 0 auto;}
+.listrow .lactions{display:flex; gap:6px;}
+.listrow .rowbtn{flex:1; padding:9px 4px; font-size:12px; border-radius:8px; border:none; background:var(--panel2); color:var(--text); font-weight:600; white-space:nowrap;}
+.listrow .rowbtn.danger{color:var(--danger);}
+.listrow.active .lname{color:var(--accent);}
+/* Inline rename swaps the name out for a text field, so there's no extra
+   sheet to open just to retitle a chart. */
+.listrow .lrename{
+  flex:1; min-width:0; font-size:15px; font-weight:600; padding:8px 10px; border-radius:8px;
+  border:1px solid var(--accent); background:var(--panel); color:var(--text);
+}
 .divider{height:1px; background:var(--line); margin:14px 0;}
 .smallmuted{font-size:12.5px; color:var(--muted); margin-top:4px;}
 #toast{
@@ -794,7 +806,8 @@ input[type=file]{display:none;}
       <button class="btn secondary" id="designOpenBtn">🎨 Chart style</button>
       <button class="btn secondary" id="exportOpenBtn">⭳ Export &amp; share</button>
     </div>
-    <p class="smallmuted">Charts are stored only on this device. Use Export JSON to back up or send a chart to another phone; Import JSON to bring one in.</p>
+    <p class="smallmuted">Everything saves automatically as you work — there’s no save button. <b>Save a copy</b> snapshots a chart so you can rearrange the original and still have the old layout.</p>
+    <p class="smallmuted">Charts are stored only on this device. Use Export JSON to back up or send a chart to another phone; Import JSON to bring one in. Add this app to your Home Screen so iOS keeps the data long-term.</p>
     <button class="btn ghost" id="menuCloseBtn" style="margin-top:6px;">Close</button>
   </div>
 </div>

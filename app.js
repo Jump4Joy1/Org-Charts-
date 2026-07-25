@@ -1888,21 +1888,87 @@
   $('menuCloseBtn').addEventListener('click', closeMenu);
   menuBackdrop.addEventListener('click', function (e) { if (e.target === menuBackdrop) closeMenu(); });
 
+  // "Foo" -> "Foo (copy)" -> "Foo (copy 2)", skipping names already taken.
+  function copyName(base) {
+    var taken = {};
+    Object.keys(state.charts).forEach(function (id) { taken[state.charts[id].name] = true; });
+    var stem = base.replace(/ \(copy( \d+)?\)$/, '');
+    var candidate = stem + ' (copy)';
+    var i = 2;
+    while (taken[candidate]) { candidate = stem + ' (copy ' + i + ')'; i++; }
+    return candidate;
+  }
+
+  // Snapshot a whole chart. The copy stays in the background so you can keep
+  // working on the original — that's the point of taking a snapshot.
+  function duplicateChart(sourceId) {
+    var src = state.charts[sourceId];
+    if (!src) return;
+    var copy = JSON.parse(JSON.stringify(src));
+    copy.id = uid();
+    copy.name = copyName(src.name);
+    // Node/edge ids only have to be unique inside a chart, so they carry over.
+    copy.updatedAt = Date.now() - 1; // just behind the original in the list
+    state.charts[copy.id] = copy;
+    saveState();
+    renderChartList();
+    toast('Saved a copy — “' + copy.name + '”');
+  }
+
   function renderChartList() {
     chartListEl.innerHTML = '';
     var charts = Object.values(state.charts).sort(function (a, b) { return b.updatedAt - a.updatedAt; });
+    var canDelete = charts.length > 1;
     charts.forEach(function (c) {
       var row = document.createElement('div');
-      row.className = 'listrow';
+      row.className = 'listrow' + (c.id === state.activeId ? ' active' : '');
       var count = Object.keys(c.nodes).length;
       row.innerHTML =
-        '<div style="flex:1;min-width:0;">' +
-          '<div class="lname">' + (c.id === state.activeId ? '● ' : '') + escapeHtml(c.name) + '</div>' +
-          '<div class="lmeta">' + count + ' box' + (count === 1 ? '' : 'es') + '</div>' +
-        '</div>' +
-        '<button class="rowbtn" data-act="open">Open</button>' +
-        (Object.keys(state.charts).length > 1 ? '<button class="rowbtn" data-act="del">Delete</button>' : '');
-      row.querySelector('[data-act="open"]').addEventListener('click', function () { state.activeId = c.id; saveState(); closeMenu(); render(); fitToScreen(); });
+        '<button class="lmain" data-act="open">' +
+          '<span class="lname">' + (c.id === state.activeId ? '● ' : '') + escapeHtml(c.name) + '</span>' +
+          '<span class="lmeta">' + count + ' box' + (count === 1 ? '' : 'es') + '</span>' +
+        '</button>' +
+        '<div class="lactions">' +
+          '<button class="rowbtn" data-act="open2">Open</button>' +
+          '<button class="rowbtn" data-act="rename">Rename</button>' +
+          '<button class="rowbtn" data-act="copy">Save a copy</button>' +
+          (canDelete ? '<button class="rowbtn danger" data-act="del">Delete</button>' : '') +
+        '</div>';
+
+      function open() { state.activeId = c.id; saveState(); closeMenu(); render(); fitToScreen(); }
+      row.querySelector('[data-act="open"]').addEventListener('click', open);
+      row.querySelector('[data-act="open2"]').addEventListener('click', open);
+      row.querySelector('[data-act="copy"]').addEventListener('click', function () { duplicateChart(c.id); });
+
+      row.querySelector('[data-act="rename"]').addEventListener('click', function () {
+        var main = row.querySelector('.lmain');
+        if (row.querySelector('.lrename')) return;
+        var input = document.createElement('input');
+        input.className = 'lrename';
+        input.value = c.name;
+        input.maxLength = 60;
+        main.replaceWith(input);
+        input.focus();
+        input.select();
+        var done = false;
+        function commit() {
+          if (done) return;
+          done = true;
+          var next = input.value.trim();
+          if (next && next !== c.name) {
+            c.name = next;
+            if (c.id === state.activeId) chartNameInput.value = next;
+            saveState();
+          }
+          renderChartList();
+        }
+        input.addEventListener('blur', commit);
+        input.addEventListener('keydown', function (e) {
+          if (e.key === 'Enter') input.blur();
+          if (e.key === 'Escape') { done = true; renderChartList(); }
+        });
+      });
+
       var delBtn = row.querySelector('[data-act="del"]');
       if (delBtn) delBtn.addEventListener('click', function () {
         if (!window.confirm('Delete "' + c.name + '"? This cannot be undone.')) return;
