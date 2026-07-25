@@ -4,8 +4,11 @@
   // ---------------------------------------------------------------------
   // Constants
   // ---------------------------------------------------------------------
-  var NODE_W = 168;
+  var NODE_W = 168;            // default box width; each box may override it
   var NODE_H_APPROX = 96;
+  var BOX_WIDTHS = [140, 168, 210, 260];
+  var FONT_SCALES = [0.85, 1, 1.2, 1.45];
+  var AVATAR_SIZES = { 0.85: 38, 1: 44, 1.2: 52, 1.45: 62 };
   var SIB_GAP = 30;
   var LEVEL_GAP = 100;
   var DRAG_THRESHOLD = 8; // px of finger movement before a touch counts as a drag
@@ -113,6 +116,12 @@
       if (!n.border) n.border = defaultBorder();
       if (n.font === undefined) n.font = '';
       if (n.textColor === undefined) n.textColor = '';
+      if (n.nickname === undefined) n.nickname = '';
+      if (n.detail === undefined) n.detail = '';
+      if (!n.avatarMode) n.avatarMode = 'auto';
+      if (!n.layout) n.layout = 'stack';
+      if (!n.fontScale) n.fontScale = 1;
+      if (!n.width) n.width = NODE_W;
     });
     delete c.settings;
     delete c.autoLayout;
@@ -239,7 +248,8 @@
   // Geometry: rect + anchor points for arbitrary (non-tree) connections
   // ---------------------------------------------------------------------
   function nodeRect(n, h) {
-    return { left: n.x, top: n.y, right: n.x + NODE_W, bottom: n.y + h, cx: n.x + NODE_W / 2, cy: n.y + h / 2, w: NODE_W, h: h };
+    var w = nodeW(n);
+    return { left: n.x, top: n.y, right: n.x + w, bottom: n.y + h, cx: n.x + w / 2, cy: n.y + h / 2, w: w, h: h };
   }
   function anchorOnNode(n, h, towardX, towardY) {
     var rect = nodeRect(n, h);
@@ -290,10 +300,33 @@
   var nodeEls = {}, noteEls = {};
 
   function applyTransform() { canvas.style.transform = 'translate(' + panX + 'px,' + panY + 'px) scale(' + scale + ')'; }
+
+  // Per-box overrides, with back-compatible defaults for older saved charts.
+  function nodeW(n) { return (n && n.width) || NODE_W; }
+  function nodeScale(n) { return (n && n.fontScale) || 1; }
+
   function initials(name) {
     var parts = (name || '').trim().split(/\s+/).filter(Boolean);
     if (!parts.length) return '?';
-    return (parts[0][0] + (parts[1] ? parts[1][0] : '')).toUpperCase();
+    // One word: show up to two characters ("JW" -> "JW", "Jesse" -> "JE"),
+    // rather than a lone letter.
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return (parts[0][0] + parts[1][0]).toUpperCase();
+  }
+
+  // What the avatar circle shows when there's no photo: an explicit badge/
+  // nickname if the user gave one, otherwise derived initials.
+  function badgeText(n) {
+    var nick = (n.nickname || '').trim();
+    return nick || initials(n.name);
+  }
+  function showsAvatar(n) {
+    var mode = n.avatarMode || 'auto';
+    if (mode === 'none') return false;
+    return true;
+  }
+  function showsPhoto(n) {
+    return !!n.photo && (n.avatarMode || 'auto') === 'auto';
   }
 
   function applyChartVars() {
@@ -309,7 +342,25 @@
 
   function applyNodeStyle(el, n) {
     el.dataset.shape = n.shape || 'rounded';
-    el.style.height = n.shape === 'circle' ? NODE_W + 'px' : '';
+    el.dataset.layout = n.layout || 'stack';
+    var w = nodeW(n);
+    var fs = nodeScale(n);
+    el.style.width = w + 'px';
+    el.style.height = n.shape === 'circle' ? w + 'px' : '';
+    el.style.padding = Math.round(10 * fs) + 'px ' + Math.round(12 * fs) + 'px';
+    var av = el.querySelector('.avatar');
+    var avSize = AVATAR_SIZES[fs] || Math.round(44 * fs);
+    av.style.width = avSize + 'px';
+    av.style.height = avSize + 'px';
+    // Shrink the badge text when it's longer than plain initials so a
+    // nickname like "Jess" still sits comfortably inside the circle.
+    var chars = showsPhoto(n) ? 2 : Math.max(1, badgeText(n).length);
+    var badgeFs = Math.min(15 * fs, (avSize * 0.86) / chars * 1.55);
+    av.style.fontSize = badgeFs.toFixed(1) + 'px';
+    av.style.display = showsAvatar(n) ? 'flex' : 'none';
+    el.querySelector('.nname').style.fontSize = (14.5 * fs).toFixed(1) + 'px';
+    el.querySelector('.ntitle').style.fontSize = (12 * fs).toFixed(1) + 'px';
+    el.querySelector('.ndetail').style.fontSize = (11 * fs).toFixed(1) + 'px';
     var fill = n.fill || defaultFill();
     if (fill.type === 'gradient') el.style.background = 'linear-gradient(135deg, ' + (fill.color || '#dfe6f2') + ', ' + (fill.color2 || '#c3d1ea') + ')';
     else if (fill.type === 'texture') el.style.background = textureCss(fill.texture, fill.color || n.color || '#3568d4', 'var(--panel)');
@@ -322,6 +373,7 @@
     var tc = textColorsFor(n);
     el.querySelector('.nname').style.color = tc.name;
     el.querySelector('.ntitle').style.color = tc.title;
+    el.querySelector('.ndetail').style.color = tc.title;
   }
 
   function render() {
@@ -343,7 +395,8 @@
         el.className = 'node';
         el.dataset.id = id;
         el.innerHTML =
-          '<div class="avatar"></div><div class="nname"></div><div class="ntitle"></div>' +
+          '<div class="avatar"></div>' +
+          '<div class="ntext"><div class="nname"></div><div class="ntitle"></div><div class="ndetail"></div></div>' +
           '<div class="handle n" data-dir="n"></div><div class="handle s" data-dir="s"></div>' +
           '<div class="handle e" data-dir="e"></div><div class="handle w" data-dir="w"></div>';
         canvas.appendChild(el);
@@ -354,12 +407,15 @@
       el.style.top = n.y + 'px';
       var color = n.color || COLOR_SWATCHES[0];
       var avatar = el.querySelector('.avatar');
-      if (n.photo) { avatar.style.background = "center/cover no-repeat url('" + n.photo + "')"; avatar.textContent = ''; }
-      else { avatar.style.background = color; avatar.textContent = initials(n.name); }
+      if (showsPhoto(n)) { avatar.style.background = "center/cover no-repeat url('" + n.photo + "')"; avatar.textContent = ''; }
+      else { avatar.style.background = color; avatar.textContent = badgeText(n); }
       el.querySelector('.nname').textContent = n.name || 'Unnamed';
       var t = el.querySelector('.ntitle');
       t.textContent = n.title || '';
       t.style.display = n.title ? 'block' : 'none';
+      var dt = el.querySelector('.ndetail');
+      dt.textContent = n.detail || '';
+      dt.style.display = n.detail ? 'block' : 'none';
       applyNodeStyle(el, n);
     });
 
@@ -388,13 +444,13 @@
     var chart = getActiveChart();
     if (note.attach && note.attach.type === 'node') {
       var n = chart.nodes[note.attach.id];
-      if (n) return { x: n.x + NODE_W + 16 + (note.dx || 0), y: n.y + (note.dy || 0) };
+      if (n) return { x: n.x + nodeW(n) + 16 + (note.dx || 0), y: n.y + (note.dy || 0) };
     } else if (note.attach && note.attach.type === 'edge') {
       var e = chart.edges[note.attach.id];
       if (e) {
         var a = chart.nodes[e.from], b = chart.nodes[e.to];
         if (a && b) {
-          var mx = (a.x + b.x) / 2 + NODE_W / 2, my = (a.y + b.y) / 2 + NODE_H_APPROX / 2;
+          var mx = (a.x + b.x) / 2 + nodeW(a) / 2, my = (a.y + b.y) / 2 + NODE_H_APPROX / 2;
           return { x: mx + (note.dx || 0), y: my + (note.dy || 0) };
         }
       }
@@ -518,7 +574,7 @@
       var n = chart.nodes[id];
       var h = (nodeEls[id] && nodeEls[id].offsetHeight) || NODE_H_APPROX;
       minX = Math.min(minX, n.x); minY = Math.min(minY, n.y);
-      maxX = Math.max(maxX, n.x + NODE_W); maxY = Math.max(maxY, n.y + h);
+      maxX = Math.max(maxX, n.x + nodeW(n)); maxY = Math.max(maxY, n.y + h);
     });
     noteIds.forEach(function (id) {
       var pos = noteAnchor(chart.notes[id]);
@@ -764,9 +820,9 @@
     var chart = getActiveChart();
     var id = uid();
     chart.nodes[id] = {
-      id: id, name: '', title: '', photo: null, x: x, y: y,
+      id: id, name: '', title: '', detail: '', nickname: '', photo: null, x: x, y: y,
       shape: 'rounded', color: randomColor(), fill: defaultFill(), border: defaultBorder(),
-      font: '', textColor: '', order: Date.now()
+      font: '', textColor: '', avatarMode: 'auto', layout: 'stack', fontScale: 1, width: NODE_W, order: Date.now()
     };
     return id;
   }
@@ -956,8 +1012,17 @@
   function refreshPhotoPreview(n) {
     pendingPhoto = n.photo || null;
     if (pendingPhoto) { photoPreview.style.background = "center/cover no-repeat url('" + pendingPhoto + "')"; photoPreview.textContent = ''; }
-    else { photoPreview.style.background = n.color || COLOR_SWATCHES[0]; photoPreview.textContent = initials(n.name); }
+    else { photoPreview.style.background = n.color || COLOR_SWATCHES[0]; photoPreview.textContent = badgeText(n); }
   }
+  // Live-preview the badge text as it's typed.
+  $('fNickname').addEventListener('input', function () {
+    if (pendingPhoto) return;
+    photoPreview.textContent = $('fNickname').value.trim() || initials(fName.value);
+  });
+  fName.addEventListener('input', function () {
+    if (pendingPhoto || $('fNickname').value.trim()) return;
+    photoPreview.textContent = initials(fName.value);
+  });
 
   function updateFillPickerVisibility() {
     var t = segValue(segFillType);
@@ -972,7 +1037,14 @@
     if (!n) return;
     fName.value = n.name || '';
     fTitle.value = n.title || '';
+    $('fDetail').value = n.detail || '';
+    $('fNickname').value = n.nickname || '';
+    $('fNickname').placeholder = 'Auto from name — e.g. ' + initials(n.name || 'Jane Wilson');
     refreshPhotoPreview(n);
+    wireSeg($('segAvatar'), n.avatarMode || 'auto');
+    wireSeg($('segLayout'), n.layout || 'stack');
+    wireSeg($('segFontScale'), String(n.fontScale || 1));
+    wireSeg($('segWidth'), String(n.width || NODE_W));
     wireSeg(segShape, n.shape || 'rounded');
     buildColorRow(colorPicker, n.color || COLOR_SWATCHES[0]);
     var fill = n.fill || defaultFill();
@@ -1000,7 +1072,13 @@
     pushUndo();
     n.name = fName.value.trim() || 'Unnamed';
     n.title = fTitle.value.trim();
+    n.detail = $('fDetail').value.trim();
+    n.nickname = $('fNickname').value.trim();
     n.photo = pendingPhoto || null;
+    n.avatarMode = segValue($('segAvatar'));
+    n.layout = segValue($('segLayout'));
+    n.fontScale = parseFloat(segValue($('segFontScale')));
+    n.width = parseInt(segValue($('segWidth')), 10);
     n.shape = segValue(segShape);
     n.color = colorPicker.dataset.value;
     n.fill = { type: segValue(segFillType), color: fillColorPicker.dataset.value, color2: fillColor2Picker.dataset.value, texture: fillTextureGrid.dataset.value };
@@ -1019,7 +1097,7 @@
     pushUndo();
     var copy = JSON.parse(JSON.stringify(src));
     copy.id = uid();
-    copy.x = src.x + NODE_W + SIB_GAP;
+    copy.x = src.x + nodeW(src) + SIB_GAP;
     copy.y = src.y;
     copy.order = Date.now();
     chart.nodes[copy.id] = copy;
@@ -1296,7 +1374,7 @@
       if (!n) return;
       el = nodeEls[item.id];
       var h = (el && el.offsetHeight) || NODE_H_APPROX;
-      cx = n.x + NODE_W / 2; cy = n.y + h / 2;
+      cx = n.x + nodeW(n) / 2; cy = n.y + h / 2;
     } else if (item.kind === 'note') {
       var note = chart.notes[item.id];
       if (!note) return;
@@ -1311,7 +1389,7 @@
       if (!a || !b) return;
       var ha = (nodeEls[e.from] && nodeEls[e.from].offsetHeight) || NODE_H_APPROX;
       var hb = (nodeEls[e.to] && nodeEls[e.to].offsetHeight) || NODE_H_APPROX;
-      cx = (a.x + NODE_W / 2 + b.x + NODE_W / 2) / 2;
+      cx = (a.x + nodeW(a) / 2 + b.x + nodeW(b) / 2) / 2;
       cy = (a.y + ha / 2 + b.y + hb / 2) / 2;
     }
     scale = Math.min(Math.max(scale, 0.75), 1.4);
@@ -1396,11 +1474,12 @@
     ids.forEach(function (id) { var l = level[id]; (byLevel[l] = byLevel[l] || []).push(id); });
     Object.keys(byLevel).forEach(function (l) {
       var row = byLevel[l];
-      var totalW = row.length * (NODE_W + SIB_GAP) - SIB_GAP;
-      var startX = -totalW / 2;
-      row.forEach(function (id, idx) {
-        chart.nodes[id].x = startX + idx * (NODE_W + SIB_GAP);
+      var totalW = row.reduce(function (acc, id) { return acc + nodeW(chart.nodes[id]) + SIB_GAP; }, -SIB_GAP);
+      var cursorX = -totalW / 2;
+      row.forEach(function (id) {
+        chart.nodes[id].x = cursorX;
         chart.nodes[id].y = Number(l) * (NODE_H_APPROX + LEVEL_GAP);
+        cursorX += nodeW(chart.nodes[id]) + SIB_GAP;
       });
     });
   }
@@ -1578,7 +1657,7 @@
       var n = chart.nodes[id];
       var h = (nodeEls[id] && nodeEls[id].offsetHeight) || NODE_H_APPROX;
       minX = Math.min(minX, n.x); minY = Math.min(minY, n.y);
-      maxX = Math.max(maxX, n.x + NODE_W); maxY = Math.max(maxY, n.y + h);
+      maxX = Math.max(maxX, n.x + nodeW(n)); maxY = Math.max(maxY, n.y + h);
     });
     noteIds.forEach(function (id) {
       var pos = noteAnchor(chart.notes[id]);
@@ -1614,8 +1693,8 @@
       var hB = (nodeEls[e.to] && nodeEls[e.to].offsetHeight) || NODE_H_APPROX;
       var aDoc = Object.assign({}, a, toDoc(a.x, a.y));
       var bDoc = Object.assign({}, b, toDoc(b.x, b.y));
-      var pA = anchorOnNode(aDoc, hA, bDoc.x + NODE_W / 2, bDoc.y + hB / 2);
-      var pB = anchorOnNode(bDoc, hB, aDoc.x + NODE_W / 2, aDoc.y + hA / 2);
+      var pA = anchorOnNode(aDoc, hA, bDoc.x + nodeW(b) / 2, bDoc.y + hB / 2);
+      var pB = anchorOnNode(bDoc, hB, aDoc.x + nodeW(a) / 2, aDoc.y + hA / 2);
       var style = e.style || 'elbow';
       var d = edgePathBetween(pA, pB, style);
       var color = e.color || (isDark ? '#5c8bef' : '#3568d4');
@@ -1640,8 +1719,9 @@
       var x = p.x, y = p.y;
       var accent = n.color || COLOR_SWATCHES[0];
       var shape = n.shape || 'rounded';
-      var rx = shape === 'rect' ? 3 : (shape === 'pill' ? h / 2 : (shape === 'circle' ? NODE_W / 2 : 14));
-      var boxH = shape === 'circle' ? NODE_W : h;
+      var W = nodeW(n), fs = nodeScale(n);
+      var rx = shape === 'rect' ? 3 : (shape === 'pill' ? h / 2 : (shape === 'circle' ? W / 2 : 14));
+      var boxH = shape === 'circle' ? W : h;
       var fill = n.fill || defaultFill();
       var fillAttr;
       if (fill.type === 'gradient') {
@@ -1655,31 +1735,68 @@
       } else fillAttr = fill.color || panelBg;
       var border = n.border || defaultBorder();
       var dashArr2 = border.dash === 'dashed' ? (border.width * 2.5) + ' ' + (border.width * 2) : (border.dash === 'dotted' ? '1 ' + (border.width * 2.2) : '');
-      parts.push('<rect x="' + x + '" y="' + y + '" width="' + NODE_W + '" height="' + boxH + '" rx="' + rx + '" fill="' + fillAttr + '" stroke="' + (border.color || panelLine) + '" stroke-width="' + (border.width || 1) + '"' + (dashArr2 ? ' stroke-dasharray="' + dashArr2 + '"' : '') + '/>');
-      var cx = x + NODE_W / 2, avatarCy = y + 30;
-      if (n.photo) {
-        var clipId = 'clip' + idx;
-        defs.push('<clipPath id="' + clipId + '"><circle cx="' + cx + '" cy="' + avatarCy + '" r="22"/></clipPath>');
-        parts.push('<image href="' + n.photo + '" x="' + (cx - 22) + '" y="' + (avatarCy - 22) + '" width="44" height="44" clip-path="url(#' + clipId + ')" preserveAspectRatio="xMidYMid slice"/>');
-      } else {
-        parts.push('<circle cx="' + cx + '" cy="' + avatarCy + '" r="22" fill="' + accent + '"/>');
-        parts.push('<text x="' + cx + '" y="' + (avatarCy + 5) + '" font-size="14" font-weight="700" fill="#fff" text-anchor="middle">' + escapeHtml(initials(n.name)) + '</text>');
+      parts.push('<rect x="' + x + '" y="' + y + '" width="' + W + '" height="' + boxH + '" rx="' + rx + '" fill="' + fillAttr + '" stroke="' + (border.color || panelLine) + '" stroke-width="' + (border.width || 1) + '"' + (dashArr2 ? ' stroke-dasharray="' + dashArr2 + '"' : '') + '/>');
+
+      var isRow = (n.layout || 'stack') === 'row';
+      var padT = 10 * fs, padL = 12 * fs;
+      var avR = (AVATAR_SIZES[fs] || 44 * fs) / 2;
+      var cx = isRow ? x + padL + avR : x + W / 2;
+      var cursorY = y + padT;
+      // Compact layout: badge on the left, text left-aligned beside it.
+      var textAnchor = isRow ? 'start' : 'middle';
+      var textX = isRow ? (x + padL + (showsAvatar(n) ? avR * 2 + 10 : 0)) : x + W / 2;
+      var innerW = isRow ? (W - (textX - x) - padL) : (W - 20 * fs);
+      if (showsAvatar(n)) {
+        var avatarCy = isRow ? y + boxH / 2 : cursorY + avR;
+        if (showsPhoto(n)) {
+          var clipId = 'clip' + idx;
+          defs.push('<clipPath id="' + clipId + '"><circle cx="' + cx + '" cy="' + avatarCy + '" r="' + avR + '"/></clipPath>');
+          parts.push('<image href="' + n.photo + '" x="' + (cx - avR) + '" y="' + (avatarCy - avR) + '" width="' + (avR * 2) + '" height="' + (avR * 2) + '" clip-path="url(#' + clipId + ')" preserveAspectRatio="xMidYMid slice"/>');
+        } else {
+          var badge = badgeText(n);
+          // Shrink the badge text if the user typed something longer than initials.
+          var badgeSize = Math.min(15 * fs, (avR * 1.75) / Math.max(1, badge.length) * 1.6);
+          parts.push('<circle cx="' + cx + '" cy="' + avatarCy + '" r="' + avR + '" fill="' + accent + '"/>');
+          parts.push('<text x="' + cx + '" y="' + (avatarCy + badgeSize * 0.35) + '" font-family="' + ((n.font ? FONT_STACKS[n.font] : fontFamily).replace(/"/g, "'")) + '" font-size="' + badgeSize.toFixed(1) + '" font-weight="700" fill="#fff" text-anchor="middle">' + escapeHtml(badge) + '</text>');
+        }
+        if (!isRow) cursorY = avatarCy + avR + 6 * fs;
       }
+
       var tcx = textColorsFor(n);
       var nameColor = tcx.name || textColorDefault;
       var titleColor = tcx.title || mutedColor;
       var nameFont = (n.font ? FONT_STACKS[n.font] : fontFamily).replace(/"/g, "'");
+      var nameSize = 14.5 * fs, titleSize = 12 * fs, detailSize = 11 * fs;
       // Wrap rather than truncate, so the exported chart matches the screen.
-      var nameLines = wrapSvgText(n.name || 'Unnamed', NODE_W - 20, 13.5, true);
-      var titleLines = n.title ? wrapSvgText(n.title, NODE_W - 20, 11.5, false) : [];
-      var textTop = y + 64;
+      var nameLines = wrapSvgText(n.name || 'Unnamed', innerW, nameSize, true);
+      var titleLines = n.title ? wrapSvgText(n.title, innerW, titleSize, false) : [];
+      var detailLines = n.detail ? wrapSvgText(n.detail, innerW, detailSize, false) : [];
+
+      if (isRow) {
+        var blockH = nameLines.length * nameSize * 1.25
+          + (titleLines.length ? titleSize * 1.35 + (titleLines.length - 1) * titleSize * 1.2 : 0)
+          + (detailLines.length ? detailSize * 1.35 + (detailLines.length - 1) * detailSize * 1.2 : 0);
+        cursorY = y + boxH / 2 - blockH / 2;
+      }
+      cursorY += nameSize;
       nameLines.forEach(function (line, li) {
-        parts.push('<text x="' + cx + '" y="' + (textTop + li * 16) + '" font-family="' + nameFont + '" font-size="13.5" font-weight="700" fill="' + nameColor + '" text-anchor="middle">' + escapeHtml(line) + '</text>');
+        parts.push('<text x="' + textX + '" y="' + (cursorY + li * nameSize * 1.25) + '" font-family="' + nameFont + '" font-size="' + nameSize.toFixed(1) + '" font-weight="700" fill="' + nameColor + '" text-anchor="' + textAnchor + '">' + escapeHtml(line) + '</text>');
       });
-      var titleTop = textTop + nameLines.length * 16 + 2;
-      titleLines.forEach(function (line, li) {
-        parts.push('<text x="' + cx + '" y="' + (titleTop + li * 14) + '" font-family="' + nameFont + '" font-size="11.5" fill="' + titleColor + '" text-anchor="middle">' + escapeHtml(line) + '</text>');
-      });
+      cursorY += (nameLines.length - 1) * nameSize * 1.25;
+
+      if (titleLines.length) {
+        cursorY += titleSize * 1.35;
+        titleLines.forEach(function (line, li) {
+          parts.push('<text x="' + textX + '" y="' + (cursorY + li * titleSize * 1.2) + '" font-family="' + nameFont + '" font-size="' + titleSize.toFixed(1) + '" fill="' + titleColor + '" text-anchor="' + textAnchor + '">' + escapeHtml(line) + '</text>');
+        });
+        cursorY += (titleLines.length - 1) * titleSize * 1.2;
+      }
+      if (detailLines.length) {
+        cursorY += detailSize * 1.35;
+        detailLines.forEach(function (line, li) {
+          parts.push('<text x="' + textX + '" y="' + (cursorY + li * detailSize * 1.2) + '" font-family="' + nameFont + '" font-size="' + detailSize.toFixed(1) + '" fill="' + titleColor + '" text-anchor="' + textAnchor + '">' + escapeHtml(line) + '</text>');
+        });
+      }
     });
 
     noteIds.forEach(function (id) {
