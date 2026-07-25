@@ -104,6 +104,7 @@
     c.notes = c.notes || {};
     if (!c.background) c.background = defaultBackground();
     if (!c.font) c.font = (c.settings && c.settings.font) || 'system';
+    if (!c.badges) c.badges = 'show';
     Object.keys(c.nodes).forEach(function (id) {
       var n = c.nodes[id];
       if (n.parentId) {
@@ -139,7 +140,7 @@
   }
 
   function newChartObj(id, name) {
-    return { id: id, name: name || 'Untitled chart', nodes: {}, edges: {}, notes: {}, background: defaultBackground(), font: 'system', updatedAt: Date.now() };
+    return { id: id, name: name || 'Untitled chart', nodes: {}, edges: {}, notes: {}, background: defaultBackground(), font: 'system', badges: 'show', updatedAt: Date.now() };
   }
 
   var redoStack = [];
@@ -822,7 +823,7 @@
     chart.nodes[id] = {
       id: id, name: '', title: '', detail: '', nickname: '', photo: null, x: x, y: y,
       shape: 'rounded', color: randomColor(), fill: defaultFill(), border: defaultBorder(),
-      font: '', textColor: '', avatarMode: 'auto', layout: 'stack', fontScale: 1, width: NODE_W, order: Date.now()
+      font: '', textColor: '', avatarMode: (chart.badges === 'hide' ? 'none' : 'auto'), layout: 'stack', fontScale: 1, width: NODE_W, order: Date.now()
     };
     return id;
   }
@@ -1561,6 +1562,18 @@
     buildColorRow(bgColor2Picker, bg.color2 || '#dbe0e6', applyBgLive);
     buildTextureGrid(bgTextureGrid, bg.texture || 'dots', bg.color || '#6b7684', applyBgLive);
     updateBgPickerVisibility();
+    wireSeg($('segChartBadges'), chart.badges || 'show', function (v) {
+      pushUndo();
+      var c = getActiveChart();
+      c.badges = v;
+      // Apply to every existing box so one switch clears them all.
+      Object.keys(c.nodes).forEach(function (id) {
+        c.nodes[id].avatarMode = (v === 'hide') ? 'none' : 'auto';
+      });
+      saveState();
+      render();
+      toast(v === 'hide' ? 'Badges hidden' : 'Badges shown');
+    });
     populateFontSelect(chartFontSel, chart.font);
     buildThemeGrid();
     wireSeg($('segAppearance'), getAppearance(), setAppearance);
