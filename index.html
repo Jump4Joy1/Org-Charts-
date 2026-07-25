@@ -85,6 +85,8 @@ svg#edges{position:absolute; left:0; top:0; overflow:visible;}
 .edge-label{pointer-events:none; text-anchor:middle; dominant-baseline:middle;}
 .temp-edge{fill:none; stroke:var(--accent); stroke-width:2.5; stroke-dasharray:6 5; pointer-events:none;}
 .note-tether{stroke:var(--muted); stroke-width:1.5; stroke-dasharray:3 4; opacity:.6; pointer-events:none;}
+svg#guides{position:absolute; left:0; top:0; overflow:visible; pointer-events:none; z-index:40;}
+.guide{stroke:#ff3b8d; stroke-width:1.5; stroke-dasharray:5 4; opacity:.9;}
 
 .node{
   position:absolute; width:168px; touch-action:none; user-select:none;
@@ -150,6 +152,39 @@ svg#edges{position:absolute; left:0; top:0; overflow:visible;}
   border:1px solid rgba(0,0,0,.08); color:#3a3420;
 }
 .note.dragging{z-index:50; box-shadow:0 10px 26px rgba(0,0,0,.25);}
+
+/* Title block + legend live on the canvas and are draggable like notes. */
+/* #canvas has no intrinsic width, so absolutely-positioned children would
+   shrink-to-fit against a zero-width containing block and collapse to one
+   word per line. max-content sizes them to their text instead. */
+.titleblock{
+  position:absolute; touch-action:none; user-select:none;
+  width:max-content; max-width:420px;
+  color:var(--text); padding:2px 4px;
+}
+.titleblock .tbTitle{font-size:26px; font-weight:700; line-height:1.15; word-break:break-word;}
+.titleblock .tbSub{font-size:14px; color:var(--muted); margin-top:3px; word-break:break-word;}
+.titleblock .tbDate{font-size:11.5px; color:var(--muted); margin-top:6px; letter-spacing:.03em;}
+.titleblock.dragging{opacity:.85;}
+
+.legendbox{
+  position:absolute; touch-action:none; user-select:none;
+  width:max-content; min-width:150px; max-width:300px;
+  background:var(--panel); border:1px solid var(--line); border-radius:10px;
+  padding:10px 12px; box-shadow:var(--shadow);
+}
+.legendbox .lgRow span:last-child{white-space:nowrap;}
+.legendbox.dragging{z-index:50; box-shadow:0 10px 26px rgba(0,0,0,.25);}
+.legendbox .lgTitle{font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); margin-bottom:7px;}
+.legendbox .lgRow{display:flex; align-items:center; gap:8px; margin-top:5px; font-size:12.5px; color:var(--text);}
+.legendbox .lgSwatch{width:15px; height:15px; border-radius:4px; flex:0 0 auto; border:1px solid rgba(0,0,0,.12);}
+.legendbox .lgLine{width:22px; height:0; border-top-width:2.5px; border-top-style:solid; flex:0 0 auto;}
+
+.legendrow{display:flex; align-items:center; gap:8px; padding:8px 0; border-bottom:1px solid var(--line);}
+.legendrow .lrSwatch{width:34px; height:30px; border-radius:8px; border:1px solid var(--line); flex:0 0 auto; padding:0; position:relative; overflow:hidden;}
+.legendrow .lrSwatch input{position:absolute; inset:-6px; opacity:0; width:150%; height:150%;}
+.legendrow input.lrLabel{flex:1; min-width:0; padding:9px 10px; border-radius:9px; border:1px solid var(--line); background:var(--panel2); color:var(--text); font-size:15px;}
+.legendrow .lrDel{flex:0 0 auto; width:34px; height:34px; border-radius:9px; border:none; background:var(--panel2); color:var(--danger); font-size:17px;}
 
 /* ---- Empty state ---- */
 #empty{
@@ -493,6 +528,39 @@ input[type=file]{display:none;}
   </div>
 </div>
 
+<!-- Title block & legend sheet -->
+<div class="sheet-backdrop" id="titleBackdrop">
+  <div class="sheet" id="titleSheet">
+    <div class="sheet-handle"></div>
+    <h3>Title &amp; legend</h3>
+
+    <h4>Title block</h4>
+    <div class="seg" id="segTitleShow">
+      <button data-v="on">Show title</button>
+      <button data-v="off" class="sel">Hidden</button>
+    </div>
+    <div class="field" style="margin-top:10px;"><label>Title</label><input id="tTitle" placeholder="Gum Springs Homestead"></div>
+    <div class="field"><label>Subtitle</label><input id="tSubtitle" placeholder="Roles &amp; reporting"></div>
+    <div class="field"><label>Footnote / date</label><input id="tDate" placeholder="e.g. Updated July 2026"></div>
+
+    <h4>Legend</h4>
+    <div class="seg" id="segLegendShow">
+      <button data-v="on">Show legend</button>
+      <button data-v="off" class="sel">Hidden</button>
+    </div>
+    <div class="field" style="margin-top:10px;"><label>Legend heading</label><input id="lTitle" placeholder="Key"></div>
+    <div id="legendItems"></div>
+    <div class="btnrow">
+      <button class="btn secondary" id="legendAddFill">+ Colour key</button>
+      <button class="btn secondary" id="legendAddLine">+ Line key</button>
+    </div>
+    <button class="btn secondary" id="legendAuto" style="margin-top:10px;width:100%;">Build from colours used in this chart</button>
+    <p class="smallmuted">A key is what turns colour-coding into information. Drag the title and legend anywhere on the canvas.</p>
+
+    <button class="btn" id="titleDone" style="margin-top:16px;">Done</button>
+  </div>
+</div>
+
 <!-- Apply-style-to-all sheet -->
 <div class="sheet-backdrop" id="applyBackdrop">
   <div class="sheet" id="applySheet">
@@ -623,6 +691,30 @@ input[type=file]{display:none;}
     <div class="colors" id="bgColorPicker" style="margin-top:8px;"></div>
     <div class="colors" id="bgColor2Picker" style="margin-top:8px;display:none;"></div>
     <div class="texturegrid" id="bgTextureGrid" style="display:none;"></div>
+
+    <div class="btnrow" style="margin-top:0;">
+      <button class="btn secondary" id="titleOpenBtn" style="flex:1;">🏷 Title block &amp; legend</button>
+    </div>
+
+    <h4>Connector lines</h4>
+    <div class="seg" id="segTrunk">
+      <button data-v="trunk" class="sel">
+        <svg width="30" height="20" viewBox="0 0 30 20"><path d="M15 1 V7 M4 7 H26 M4 7 V13 M26 7 V13" stroke="currentColor" stroke-width="2" fill="none"/><rect x="1" y="14" width="6" height="5" rx="1.5" fill="currentColor"/><rect x="23" y="14" width="6" height="5" rx="1.5" fill="currentColor"/></svg>
+        Shared trunk
+      </button>
+      <button data-v="separate">
+        <svg width="30" height="20" viewBox="0 0 30 20"><path d="M15 1 V4 Q15 7 10 7 T4 13 M15 1 V4 Q15 7 20 7 T26 13" stroke="currentColor" stroke-width="2" fill="none"/><rect x="1" y="14" width="6" height="5" rx="1.5" fill="currentColor"/><rect x="23" y="14" width="6" height="5" rx="1.5" fill="currentColor"/></svg>
+        Separate
+      </button>
+    </div>
+    <p class="smallmuted">Shared trunk is the classic org-chart look: one line down from a manager, branching to their reports.</p>
+
+    <h4>Snap &amp; align</h4>
+    <div class="seg" id="segSnap">
+      <button data-v="on" class="sel">Snap on</button>
+      <button data-v="off">Free drag</button>
+    </div>
+    <p class="smallmuted">Snapping lines boxes up with their neighbours as you drag, with a guide showing the match.</p>
 
     <h4>Badges on every box</h4>
     <div class="seg" id="segChartBadges">

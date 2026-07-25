@@ -105,6 +105,10 @@
     if (!c.background) c.background = defaultBackground();
     if (!c.font) c.font = (c.settings && c.settings.font) || 'system';
     if (!c.badges) c.badges = 'show';
+    if (c.trunk === undefined) c.trunk = true;
+    if (c.snap === undefined) c.snap = true;
+    if (!c.titleBlock) c.titleBlock = { show: false, title: '', subtitle: '', date: '', x: null, y: null };
+    if (!c.legend) c.legend = { show: false, title: 'Key', items: [], x: null, y: null };
     Object.keys(c.nodes).forEach(function (id) {
       var n = c.nodes[id];
       if (n.parentId) {
@@ -141,7 +145,10 @@
   }
 
   function newChartObj(id, name) {
-    return { id: id, name: name || 'Untitled chart', nodes: {}, edges: {}, notes: {}, background: defaultBackground(), font: 'system', badges: 'show', updatedAt: Date.now() };
+    return { id: id, name: name || 'Untitled chart', nodes: {}, edges: {}, notes: {}, background: defaultBackground(), font: 'system', badges: 'show', trunk: true, snap: true,
+      titleBlock: { show: false, title: '', subtitle: '', date: '', x: null, y: null },
+      legend: { show: false, title: 'Key', items: [], x: null, y: null },
+      updatedAt: Date.now() };
   }
 
   var redoStack = [];
@@ -286,6 +293,51 @@
     var c1x = x1 + dx * 0.33 + px * bow, c1y = y1 + dy * 0.33 + py * bow;
     var c2x = x1 + dx * 0.67 + px * bow, c2y = y1 + dy * 0.67 + py * bow;
     return 'M ' + x1 + ' ' + y1 + ' C ' + c1x + ' ' + c1y + ', ' + c2x + ' ' + c2y + ', ' + x2 + ' ' + y2;
+  }
+
+  // -------------------------------------------------------------------
+  // Sibling trunk routing
+  // -------------------------------------------------------------------
+  // Classic org-chart connectors: one line drops from the parent to a
+  // shared horizontal bus, then one short drop per child — instead of a
+  // separate elbow fanning out to each child. Returns a map of
+  // edgeId -> path string for every edge that qualifies.
+  function computeTrunkPaths(chart, heightOf) {
+    var out = {};
+    if (chart.trunk === false) return out;
+    var byParent = {};
+    Object.keys(chart.edges).forEach(function (id) {
+      var e = chart.edges[id];
+      if ((e.style || 'elbow') !== 'elbow') return;
+      var a = chart.nodes[e.from], b = chart.nodes[e.to];
+      if (!a || !b) return;
+      // Only when the child genuinely hangs below the parent.
+      if (b.y <= a.y + heightOf(e.from) - 1) return;
+      // Group by parent *and* stroke look, so differently styled lines
+      // (e.g. a dotted-line report) keep their own trunk.
+      var key = e.from + '|' + (e.color || '') + '|' + (e.width || 2) + '|' + (e.dash || 'solid');
+      (byParent[key] = byParent[key] || []).push(id);
+    });
+    Object.keys(byParent).forEach(function (key) {
+      var ids = byParent[key];
+      if (ids.length < 2) return;           // a lone child needs no trunk
+      var parentId = chart.edges[ids[0]].from;
+      var p = chart.nodes[parentId];
+      var pH = heightOf(parentId);
+      var pBottom = p.y + pH;
+      var childTop = Infinity;
+      ids.forEach(function (id) { childTop = Math.min(childTop, chart.nodes[chart.edges[id].to].y); });
+      if (childTop <= pBottom) return;      // overlapping — fall back to normal elbows
+      var busY = (pBottom + childTop) / 2;
+      var px = p.x + nodeW(p) / 2;
+      ids.forEach(function (id) {
+        var c = chart.nodes[chart.edges[id].to];
+        var cxx = c.x + nodeW(c) / 2;
+        out[id] = 'M ' + px + ' ' + pBottom + ' L ' + px + ' ' + busY +
+                  ' L ' + cxx + ' ' + busY + ' L ' + cxx + ' ' + c.y;
+      });
+    });
+    return out;
   }
 
   function midOfPath(pA, pB, style) {
@@ -440,6 +492,8 @@
       el.style.top = pos.y + 'px';
     });
 
+    renderTitleBlock();
+    renderLegend();
     drawEdges();
   }
 
@@ -459,6 +513,122 @@
       }
     }
     return { x: note.x || 0, y: note.y || 0 };
+  }
+
+  // -------------------------------------------------------------------
+  // Title block + legend (canvas overlays, draggable, exported)
+  // -------------------------------------------------------------------
+  var titleEl = null, legendEl = null;
+
+  // Bounding box of just the boxes and notes, used to place these the first
+  // time they're switched on.
+  function contentBounds() {
+    var chart = getActiveChart();
+    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    Object.keys(chart.nodes).forEach(function (id) {
+      var n = chart.nodes[id];
+      var h = (nodeEls[id] && nodeEls[id].offsetHeight) || NODE_H_APPROX;
+      minX = Math.min(minX, n.x); minY = Math.min(minY, n.y);
+      maxX = Math.max(maxX, n.x + nodeW(n)); maxY = Math.max(maxY, n.y + h);
+    });
+    Object.keys(chart.notes).forEach(function (id) {
+      var p = noteAnchor(chart.notes[id]);
+      minX = Math.min(minX, p.x); minY = Math.min(minY, p.y);
+      maxX = Math.max(maxX, p.x + 132); maxY = Math.max(maxY, p.y + 70);
+    });
+    if (minX === Infinity) return { minX: 0, minY: 0, maxX: 200, maxY: 120 };
+    return { minX: minX, minY: minY, maxX: maxX, maxY: maxY };
+  }
+
+  function renderTitleBlock() {
+    var chart = getActiveChart();
+    var tb = chart.titleBlock;
+    if (!tb || !tb.show) { if (titleEl) { titleEl.remove(); titleEl = null; } return; }
+    if (!titleEl) {
+      titleEl = document.createElement('div');
+      titleEl.className = 'titleblock';
+      titleEl.innerHTML = '<div class="tbTitle"></div><div class="tbSub"></div><div class="tbDate"></div>';
+      canvas.appendChild(titleEl);
+      wireOverlayDrag(titleEl, function () { return getActiveChart().titleBlock; });
+    }
+    var t = titleEl.querySelector('.tbTitle');
+    var sub = titleEl.querySelector('.tbSub');
+    var dt = titleEl.querySelector('.tbDate');
+    t.textContent = tb.title || chart.name || 'Untitled chart';
+    sub.textContent = tb.subtitle || '';
+    sub.style.display = tb.subtitle ? 'block' : 'none';
+    dt.textContent = tb.date || '';
+    dt.style.display = tb.date ? 'block' : 'none';
+    if (tb.x === null || tb.x === undefined) {
+      var b = contentBounds();
+      tb.x = b.minX; tb.y = b.minY - 96;
+    }
+    titleEl.style.left = tb.x + 'px';
+    titleEl.style.top = tb.y + 'px';
+  }
+
+  function legendSampleHtml(item) {
+    if (item.type === 'line') {
+      var dash = item.dash === 'dashed' ? 'dashed' : (item.dash === 'dotted' ? 'dotted' : 'solid');
+      return '<span class="lgLine" style="border-top-color:' + item.color + '; border-top-style:' + dash + ';"></span>';
+    }
+    return '<span class="lgSwatch" style="background:' + item.color + '"></span>';
+  }
+
+  function renderLegend() {
+    var chart = getActiveChart();
+    var lg = chart.legend;
+    if (!lg || !lg.show) { if (legendEl) { legendEl.remove(); legendEl = null; } return; }
+    if (!legendEl) {
+      legendEl = document.createElement('div');
+      legendEl.className = 'legendbox';
+      canvas.appendChild(legendEl);
+      wireOverlayDrag(legendEl, function () { return getActiveChart().legend; });
+    }
+    legendEl.innerHTML =
+      (lg.title ? '<div class="lgTitle">' + escapeHtml(lg.title) + '</div>' : '') +
+      (lg.items || []).map(function (it) {
+        return '<div class="lgRow">' + legendSampleHtml(it) + '<span>' + escapeHtml(it.label || '') + '</span></div>';
+      }).join('');
+    if (lg.x === null || lg.x === undefined) {
+      var b = contentBounds();
+      lg.x = b.maxX + 28; lg.y = b.maxY - 90;
+    }
+    legendEl.style.left = lg.x + 'px';
+    legendEl.style.top = lg.y + 'px';
+  }
+
+  // Shared drag behaviour for the title block and legend.
+  function wireOverlayDrag(el, getModel) {
+    el.addEventListener('pointerdown', function (e) {
+      e.stopPropagation();
+      var model = getModel();
+      try { el.setPointerCapture(e.pointerId); } catch (err) {}
+      var sx = e.clientX, sy = e.clientY;
+      var ox = model.x || 0, oy = model.y || 0;
+      var moved = false, preSnap = null;
+      function mv(ev) {
+        var dx = (ev.clientX - sx) / scale, dy = (ev.clientY - sy) / scale;
+        if (!moved && (Math.abs(ev.clientX - sx) > 6 || Math.abs(ev.clientY - sy) > 6)) {
+          moved = true; preSnap = snapshot(); el.classList.add('dragging');
+        }
+        if (!moved) return;
+        model.x = ox + dx; model.y = oy + dy;
+        el.style.left = model.x + 'px';
+        el.style.top = model.y + 'px';
+      }
+      function up() {
+        el.removeEventListener('pointermove', mv);
+        el.removeEventListener('pointerup', up);
+        el.removeEventListener('pointercancel', up);
+        el.classList.remove('dragging');
+        if (moved) { commitUndo(preSnap); saveState(); }
+        else openTitleSheet();
+      }
+      el.addEventListener('pointermove', mv);
+      el.addEventListener('pointerup', up);
+      el.addEventListener('pointercancel', up);
+    });
   }
 
   // Endpoints for a note's leader line, or null for free-floating notes.
@@ -519,6 +689,8 @@
   function drawEdges() {
     var chart = getActiveChart();
     var parts = [], defs = [];
+    var heightOf = function (id) { return (nodeEls[id] && nodeEls[id].offsetHeight) || NODE_H_APPROX; };
+    var trunkPaths = computeTrunkPaths(chart, heightOf);
     Object.keys(chart.edges).forEach(function (id) {
       var e = chart.edges[id];
       var a = chart.nodes[e.from], b = chart.nodes[e.to];
@@ -529,7 +701,8 @@
       var pA = anchorOnNode(a, hA, rectB.cx, rectB.cy);
       var pB = anchorOnNode(b, hB, rectA.cx, rectA.cy);
       var style = e.style || 'elbow';
-      var d = edgePathBetween(pA, pB, style);
+      var d = trunkPaths[id] || edgePathBetween(pA, pB, style);
+      if (trunkPaths[id]) { pB = { x: b.x + nodeW(b) / 2, y: b.y }; }
       var color = e.color || 'var(--accent)';
       var width = e.width || 2;
       var dashArr = e.dash === 'dashed' ? (width * 2.5) + ' ' + (width * 2) : (e.dash === 'dotted' ? '1 ' + (width * 2.2) : 'none');
@@ -540,7 +713,7 @@
       parts.push('<path class="edge-line" d="' + d + '" stroke="' + color + '" stroke-width="' + width + '" stroke-linecap="round" ' +
         (dashArr !== 'none' ? 'stroke-dasharray="' + dashArr + '"' : '') + ' ' + markerStart + ' ' + markerEnd + '/>');
       if (e.label) {
-        var mid = midOfPath(pA, pB, style);
+        var mid = trunkPaths[id] ? { x: pB.x, y: pB.y - 14 } : midOfPath(pA, pB, style);
         var w = Math.max(20, e.label.length * 6.4 + 10);
         parts.push('<rect class="edge-label-bg" x="' + (mid.x - w / 2) + '" y="' + (mid.y - 10) + '" width="' + w + '" height="18" rx="4" fill="var(--panel)" stroke="var(--line)"/>');
         parts.push('<text class="edge-label" x="' + mid.x + '" y="' + (mid.y + 1) + '" font-size="11" fill="var(--text)">' + escapeHtml(e.label) + '</text>');
@@ -584,6 +757,17 @@
       minX = Math.min(minX, pos.x); minY = Math.min(minY, pos.y);
       maxX = Math.max(maxX, pos.x + 132); maxY = Math.max(maxY, pos.y + 70);
     });
+    // Title block and legend are part of the drawing, so fit them in too.
+    if (chart.titleBlock && chart.titleBlock.show && titleEl) {
+      minX = Math.min(minX, chart.titleBlock.x); minY = Math.min(minY, chart.titleBlock.y);
+      maxX = Math.max(maxX, chart.titleBlock.x + titleEl.offsetWidth);
+      maxY = Math.max(maxY, chart.titleBlock.y + titleEl.offsetHeight);
+    }
+    if (chart.legend && chart.legend.show && legendEl) {
+      minX = Math.min(minX, chart.legend.x); minY = Math.min(minY, chart.legend.y);
+      maxX = Math.max(maxX, chart.legend.x + legendEl.offsetWidth);
+      maxY = Math.max(maxY, chart.legend.y + legendEl.offsetHeight);
+    }
     var bw = maxX - minX, bh = maxY - minY;
     var pad = 60;
     var sw = stage.clientWidth - pad * 2, sh = stage.clientHeight - pad * 2;
@@ -608,6 +792,79 @@
     return { x: (clientX - rect.left - panX) / scale, y: (clientY - rect.top - panY) / scale };
   }
 
+  // -------------------------------------------------------------------
+  // Snapping + alignment guides
+  // -------------------------------------------------------------------
+  // Professional charts want peers on the same line and even spacing, which
+  // is hard to hit with a finger. While dragging we snap the box's edges and
+  // centre to nearby boxes and show a guide where it locked on.
+  var SNAP_TOL = 7;    // chart-space px within which we snap
+  var GRID = 8;        // fallback grid when nothing else is near
+
+  function applySnap(dragId, rawX, rawY) {
+    var chart = getActiveChart();
+    if (chart.snap === false) return { x: rawX, y: rawY, guides: [] };
+    var w = nodeW(chart.nodes[dragId]);
+    var h = (nodeEls[dragId] && nodeEls[dragId].offsetHeight) || NODE_H_APPROX;
+    var tol = SNAP_TOL / Math.max(scale, 0.35);   // keep it usable when zoomed out
+    var bestX = null, bestY = null, guides = [];
+
+    Object.keys(chart.nodes).forEach(function (oid) {
+      if (oid === dragId) return;
+      var o = chart.nodes[oid];
+      var ow = nodeW(o);
+      var oh = (nodeEls[oid] && nodeEls[oid].offsetHeight) || NODE_H_APPROX;
+      // candidate: [draggedEdgeValue, targetValue]
+      [[rawX, o.x], [rawX + w / 2, o.x + ow / 2], [rawX + w, o.x + ow],
+       [rawX, o.x + ow - w], [rawX + w, o.x]].forEach(function (pair, i) {
+        var d = Math.abs(pair[0] - pair[1]);
+        if (d > tol) return;
+        if (bestX && d >= bestX.d) return;
+        var offset = [0, w / 2, w, 0, w][i];
+        bestX = { d: d, x: pair[1] - offset, line: pair[1] };
+      });
+      [[rawY, o.y], [rawY + h / 2, o.y + oh / 2], [rawY + h, o.y + oh],
+       [rawY, o.y + oh - h], [rawY + h, o.y]].forEach(function (pair, i) {
+        var d = Math.abs(pair[0] - pair[1]);
+        if (d > tol) return;
+        if (bestY && d >= bestY.d) return;
+        var offset = [0, h / 2, h, 0, h][i];
+        bestY = { d: d, y: pair[1] - offset, line: pair[1] };
+      });
+    });
+
+    var outX = bestX ? bestX.x : Math.round(rawX / GRID) * GRID;
+    var outY = bestY ? bestY.y : Math.round(rawY / GRID) * GRID;
+    if (bestX) guides.push({ vertical: true, at: bestX.line });
+    if (bestY) guides.push({ vertical: false, at: bestY.line });
+    return { x: outX, y: outY, guides: guides };
+  }
+
+  // Guides live in their own SVG layer so redrawing edges doesn't wipe them.
+  var guideSvg = null;
+  function drawGuides(guides) {
+    if (!guideSvg) {
+      guideSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      guideSvg.setAttribute('id', 'guides');
+      canvas.appendChild(guideSvg);
+    }
+    if (!guides || !guides.length) { guideSvg.innerHTML = ''; return; }
+    var chart = getActiveChart();
+    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    Object.keys(chart.nodes).forEach(function (id) {
+      var n = chart.nodes[id];
+      var h = (nodeEls[id] && nodeEls[id].offsetHeight) || NODE_H_APPROX;
+      minX = Math.min(minX, n.x); minY = Math.min(minY, n.y);
+      maxX = Math.max(maxX, n.x + nodeW(n)); maxY = Math.max(maxY, n.y + h);
+    });
+    var padG = 400;
+    guideSvg.innerHTML = guides.map(function (g) {
+      return g.vertical
+        ? '<line class="guide" x1="' + g.at + '" y1="' + (minY - padG) + '" x2="' + g.at + '" y2="' + (maxY + padG) + '"/>'
+        : '<line class="guide" x1="' + (minX - padG) + '" y1="' + g.at + '" x2="' + (maxX + padG) + '" y2="' + g.at + '"/>';
+    }).join('');
+  }
+
   function onNodeDown(e) {
     if (e.target.closest('.handle')) return;
     e.stopPropagation();
@@ -627,14 +884,17 @@
         moved = true; preSnap = snapshot(); el.classList.add('dragging');
       }
       if (!moved) return;
-      n.x = origX + dx; n.y = origY + dy;
+      var snapped = applySnap(id, origX + dx, origY + dy);
+      n.x = snapped.x; n.y = snapped.y;
       renderPositionsOnly();
+      drawGuides(snapped.guides);
     }
     function up() {
       el.removeEventListener('pointermove', move);
       el.removeEventListener('pointerup', up);
       el.removeEventListener('pointercancel', up);
       el.classList.remove('dragging');
+      drawGuides([]);
       if (moved) { commitUndo(preSnap); saveState(); renderPositionsOnly(); }
       else openEditSheet(id);
     }
@@ -1645,6 +1905,17 @@
     buildColorRow(bgColor2Picker, bg.color2 || '#dbe0e6', applyBgLive);
     buildTextureGrid(bgTextureGrid, bg.texture || 'dots', bg.color || '#6b7684', applyBgLive);
     updateBgPickerVisibility();
+    wireSeg($('segTrunk'), chart.trunk === false ? 'separate' : 'trunk', function (v) {
+      pushUndo();
+      getActiveChart().trunk = (v === 'trunk');
+      saveState(); render();
+      toast(v === 'trunk' ? 'Shared trunk lines' : 'Separate lines');
+    });
+    wireSeg($('segSnap'), chart.snap === false ? 'off' : 'on', function (v) {
+      getActiveChart().snap = (v === 'on');
+      saveState();
+      toast(v === 'on' ? 'Snapping on' : 'Free drag');
+    });
     wireSeg($('segChartBadges'), chart.badges || 'show', function (v) {
       pushUndo();
       var c = getActiveChart();
@@ -1675,6 +1946,146 @@
     closeDesign();
   });
   designBackdrop.addEventListener('click', function (e) { if (e.target === designBackdrop) closeDesign(); });
+
+  // ---------------------------------------------------------------------
+  // Title block & legend editor
+  // ---------------------------------------------------------------------
+  var titleBackdrop = $('titleBackdrop'), titleSheet = $('titleSheet');
+
+  function renderLegendEditor() {
+    var lg = getActiveChart().legend;
+    var box = $('legendItems');
+    box.innerHTML = '';
+    (lg.items || []).forEach(function (item, i) {
+      var row = document.createElement('div');
+      row.className = 'legendrow';
+      var sw = document.createElement('label');
+      sw.className = 'lrSwatch';
+      sw.style.background = item.type === 'line' ? 'var(--panel2)' : item.color;
+      if (item.type === 'line') {
+        sw.innerHTML = '<span style="position:absolute;left:4px;right:4px;top:50%;border-top:3px ' +
+          (item.dash === 'dashed' ? 'dashed' : item.dash === 'dotted' ? 'dotted' : 'solid') + ' ' + item.color + '"></span>';
+      }
+      var ci = document.createElement('input');
+      ci.type = 'color'; ci.value = /^#[0-9a-f]{6}$/i.test(item.color) ? item.color : '#3568d4';
+      ci.addEventListener('input', function () { item.color = ci.value; saveState(); renderLegendEditor(); renderLegend(); });
+      sw.appendChild(ci);
+
+      var label = document.createElement('input');
+      label.className = 'lrLabel';
+      label.value = item.label || '';
+      label.placeholder = item.type === 'line' ? 'e.g. Dotted-line report' : 'e.g. Operations';
+      label.addEventListener('input', function () { item.label = label.value; renderLegend(); });
+      label.addEventListener('change', function () { saveState(); });
+
+      var del = document.createElement('button');
+      del.type = 'button'; del.className = 'lrDel'; del.textContent = '✕';
+      del.addEventListener('click', function () {
+        pushUndo(); lg.items.splice(i, 1); saveState(); renderLegendEditor(); renderLegend();
+      });
+
+      row.appendChild(sw); row.appendChild(label);
+      // A line key cycles solid -> dashed -> dotted when its sample is tapped.
+      if (item.type === 'line') {
+        var cyc = document.createElement('button');
+        cyc.type = 'button'; cyc.className = 'lrDel'; cyc.textContent = '⋯';
+        cyc.style.color = 'var(--text)';
+        cyc.addEventListener('click', function () {
+          item.dash = item.dash === 'solid' ? 'dashed' : (item.dash === 'dashed' ? 'dotted' : 'solid');
+          saveState(); renderLegendEditor(); renderLegend();
+        });
+        row.appendChild(cyc);
+      }
+      row.appendChild(del);
+      box.appendChild(row);
+    });
+  }
+
+  // Seed the key from the colours and line styles actually used in the chart.
+  function autoLegend() {
+    var chart = getActiveChart();
+    var lg = chart.legend;
+    var seen = {}, items = [];
+    Object.keys(chart.nodes).forEach(function (id) {
+      var n = chart.nodes[id];
+      var c = (n.fill && n.fill.type === 'solid' && n.fill.color) ? n.fill.color : n.color;
+      if (!c || seen['f' + c]) return;
+      seen['f' + c] = 1;
+      items.push({ type: 'fill', color: c, label: '' });
+    });
+    Object.keys(chart.edges).forEach(function (id) {
+      var e = chart.edges[id];
+      var dash = e.dash || 'solid';
+      var col = e.color || '#3568d4';
+      var k = 'l' + dash + col;
+      if (seen[k]) return;
+      seen[k] = 1;
+      items.push({ type: 'line', color: col, dash: dash, label: dash === 'solid' ? 'Direct report' : 'Dotted-line report' });
+    });
+    lg.items = items.slice(0, 10);
+  }
+
+  function openTitleSheet() {
+    var chart = getActiveChart();
+    var tb = chart.titleBlock, lg = chart.legend;
+    wireSeg($('segTitleShow'), tb.show ? 'on' : 'off', function (v) {
+      pushUndo(); tb.show = (v === 'on');
+      if (tb.show && !tb.title) tb.title = chart.name || '';
+      saveState(); render(); $('tTitle').value = tb.title || '';
+    });
+    $('tTitle').value = tb.title || '';
+    $('tSubtitle').value = tb.subtitle || '';
+    $('tDate').value = tb.date || '';
+    wireSeg($('segLegendShow'), lg.show ? 'on' : 'off', function (v) {
+      pushUndo(); lg.show = (v === 'on');
+      if (lg.show && !(lg.items || []).length) autoLegend();
+      saveState(); render(); renderLegendEditor();
+    });
+    $('lTitle').value = lg.title || '';
+    renderLegendEditor();
+    titleBackdrop.classList.add('show');
+    titleSheet.classList.add('show');
+  }
+  function closeTitleSheet() { titleBackdrop.classList.remove('show'); titleSheet.classList.remove('show'); }
+
+  ['tTitle', 'tSubtitle', 'tDate'].forEach(function (id) {
+    var key = { tTitle: 'title', tSubtitle: 'subtitle', tDate: 'date' }[id];
+    $(id).addEventListener('input', function () { getActiveChart().titleBlock[key] = $(id).value; renderTitleBlock(); });
+    $(id).addEventListener('change', function () { saveState(); });
+  });
+  $('lTitle').addEventListener('input', function () { getActiveChart().legend.title = $('lTitle').value; renderLegend(); });
+  $('lTitle').addEventListener('change', function () { saveState(); });
+
+  $('legendAddFill').addEventListener('click', function () {
+    var lg = getActiveChart().legend;
+    pushUndo();
+    lg.items = lg.items || [];
+    lg.items.push({ type: 'fill', color: COLOR_SWATCHES[lg.items.length % COLOR_SWATCHES.length], label: '' });
+    lg.show = true;
+    saveState(); renderLegendEditor(); render();
+    wireSeg($('segLegendShow'), 'on');
+  });
+  $('legendAddLine').addEventListener('click', function () {
+    var lg = getActiveChart().legend;
+    pushUndo();
+    lg.items = lg.items || [];
+    lg.items.push({ type: 'line', color: '#6b7684', dash: 'dashed', label: '' });
+    lg.show = true;
+    saveState(); renderLegendEditor(); render();
+    wireSeg($('segLegendShow'), 'on');
+  });
+  $('legendAuto').addEventListener('click', function () {
+    pushUndo();
+    autoLegend();
+    getActiveChart().legend.show = true;
+    saveState(); renderLegendEditor(); render();
+    wireSeg($('segLegendShow'), 'on');
+    toast('Key built from chart colours');
+  });
+
+  $('titleOpenBtn').addEventListener('click', function () { closeDesign(); openTitleSheet(); });
+  $('titleDone').addEventListener('click', function () { saveState(); closeTitleSheet(); render(); });
+  titleBackdrop.addEventListener('click', function (e) { if (e.target === titleBackdrop) { saveState(); closeTitleSheet(); } });
 
   // ---------------------------------------------------------------------
   // Export sheet
@@ -1760,6 +2171,23 @@
       minX = Math.min(minX, pos.x); minY = Math.min(minY, pos.y);
       maxX = Math.max(maxX, pos.x + 132); maxY = Math.max(maxY, pos.y + 70);
     });
+    // The title block and legend are part of the drawing, so they have to
+    // widen the export bounds too or they'd be cropped off.
+    var tb = chart.titleBlock, lg = chart.legend;
+    var tbW = 0, tbH = 0;
+    if (tb && tb.show) {
+      tbW = titleEl ? titleEl.offsetWidth : 320;
+      tbH = titleEl ? titleEl.offsetHeight : 70;
+      minX = Math.min(minX, tb.x); minY = Math.min(minY, tb.y);
+      maxX = Math.max(maxX, tb.x + tbW); maxY = Math.max(maxY, tb.y + tbH);
+    }
+    var lgW = 0, lgH = 0;
+    if (lg && lg.show) {
+      lgW = legendEl ? legendEl.offsetWidth : 170;
+      lgH = legendEl ? legendEl.offsetHeight : 90;
+      minX = Math.min(minX, lg.x); minY = Math.min(minY, lg.y);
+      maxX = Math.max(maxX, lg.x + lgW); maxY = Math.max(maxY, lg.y + lgH);
+    }
     var pad = 40;
     var W = maxX - minX + pad * 2, H = maxY - minY + pad * 2;
     var fontFamily = (FONT_STACKS[chart.font] || FONT_STACKS.system).replace(/"/g, "'");
@@ -1781,6 +2209,15 @@
 
     function toDoc(x, y) { return { x: x - minX + pad, y: y - minY + pad }; }
 
+    var heightOfExp = function (id) { return (nodeEls[id] && nodeEls[id].offsetHeight) || NODE_H_APPROX; };
+    // Build trunk routes in chart space, then shift them into page space.
+    var trunkRaw = computeTrunkPaths(chart, heightOfExp);
+    var trunkDoc = {};
+    Object.keys(trunkRaw).forEach(function (id) {
+      trunkDoc[id] = trunkRaw[id].replace(/(-?[\d.]+) (-?[\d.]+)/g, function (m, mx, my) {
+        return (parseFloat(mx) - minX + pad) + ' ' + (parseFloat(my) - minY + pad);
+      });
+    });
     Object.keys(chart.edges).forEach(function (id, idx) {
       var e = chart.edges[id];
       var a = chart.nodes[e.from], b = chart.nodes[e.to];
@@ -1792,7 +2229,8 @@
       var pA = anchorOnNode(aDoc, hA, bDoc.x + nodeW(b) / 2, bDoc.y + hB / 2);
       var pB = anchorOnNode(bDoc, hB, aDoc.x + nodeW(a) / 2, aDoc.y + hA / 2);
       var style = e.style || 'elbow';
-      var d = edgePathBetween(pA, pB, style);
+      var d = trunkDoc[id] || edgePathBetween(pA, pB, style);
+      if (trunkDoc[id]) pB = { x: bDoc.x + nodeW(b) / 2, y: bDoc.y };
       var color = e.color || (isDark ? '#5c8bef' : '#3568d4');
       var width = e.width || 2;
       var dashArr = e.dash === 'dashed' ? (width * 2.5) + ' ' + (width * 2) : (e.dash === 'dotted' ? '1 ' + (width * 2.2) : '');
@@ -1801,7 +2239,7 @@
       if (e.arrowEnd !== false) { defs.push('<marker id="ee' + idx + '" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L8,4 L0,8 Z" fill="' + color + '"/></marker>'); markEnd = 'marker-end="url(#ee' + idx + ')"'; }
       parts.push('<path d="' + d + '" fill="none" stroke="' + color + '" stroke-width="' + width + '" stroke-linecap="round"' + (dashArr ? ' stroke-dasharray="' + dashArr + '"' : '') + ' ' + markStart + ' ' + markEnd + '/>');
       if (e.label) {
-        var mid = midOfPath(pA, pB, style);
+        var mid = trunkDoc[id] ? { x: pB.x, y: pB.y - 14 } : midOfPath(pA, pB, style);
         var w = Math.max(20, e.label.length * 6.4 + 10);
         parts.push('<rect x="' + (mid.x - w / 2) + '" y="' + (mid.y - 10) + '" width="' + w + '" height="18" rx="4" fill="' + panelBg + '" stroke="' + panelLine + '"/>');
         parts.push('<text x="' + mid.x + '" y="' + (mid.y + 4) + '" font-size="11" fill="' + textColorDefault + '" text-anchor="middle">' + escapeHtml(e.label) + '</text>');
@@ -1865,9 +2303,9 @@
       var nameFont = (n.font ? FONT_STACKS[n.font] : fontFamily).replace(/"/g, "'");
       var nameSize = 14.5 * fs, titleSize = 12 * fs, detailSize = 11 * fs;
       // Wrap rather than truncate, so the exported chart matches the screen.
-      var nameLines = wrapSvgText(n.name || 'Unnamed', innerW, nameSize, true);
-      var titleLines = n.title ? wrapSvgText(n.title, innerW, titleSize, false) : [];
-      var detailLines = n.detail ? wrapSvgText(n.detail, innerW, detailSize, false) : [];
+      var nameLines = wrapSvgText(n.name || 'Unnamed', innerW, nameSize, true, nameFont);
+      var titleLines = n.title ? wrapSvgText(n.title, innerW, titleSize, false, nameFont) : [];
+      var detailLines = n.detail ? wrapSvgText(n.detail, innerW, detailSize, false, nameFont) : [];
 
       var textBlockH = nameLines.length * nameSize * 1.25
         + (titleLines.length ? titleSize * 1.35 + (titleLines.length - 1) * titleSize * 1.2 : 0)
@@ -1936,7 +2374,7 @@
       var pos = noteAnchor(note);
       var p = toDoc(pos.x, pos.y);
       var w = 132;
-      var lines = wrapSvgText(note.text || '', w - 20, 11.5, false);
+      var lines = wrapSvgText(note.text || '', w - 20, 11.5, false, fontFamily);
       var h2 = Math.max(70, 16 + lines.length * 14);
       parts.push('<rect x="' + p.x + '" y="' + p.y + '" width="' + w + '" height="' + h2 + '" rx="8" fill="' + (note.color || '#ffe58a') + '" stroke="rgba(0,0,0,.15)"/>');
       lines.forEach(function (line, li) {
@@ -1944,26 +2382,79 @@
       });
     });
 
+    // ---- title block ----
+    if (tb && tb.show) {
+      var tX = tb.x - minX + pad, tY = tb.y - minY + pad;
+      // Match the on-screen .titleblock max-width, with a little slack so a
+      // title that fits on one line on screen doesn't wrap in the export.
+      var titleWrapW = Math.min(420, Math.max(tbW + 4, 200));
+      var tLines = wrapSvgText(tb.title || chart.name || '', titleWrapW, 26, true, fontFamily);
+      var ty = tY + 26;
+      tLines.forEach(function (line, li) {
+        parts.push('<text x="' + tX + '" y="' + (ty + li * 30) + '" font-family="' + fontFamily + '" font-size="26" font-weight="700" fill="' + textColorDefault + '">' + escapeHtml(line) + '</text>');
+      });
+      ty += (tLines.length - 1) * 30;
+      if (tb.subtitle) { ty += 21; parts.push('<text x="' + tX + '" y="' + ty + '" font-family="' + fontFamily + '" font-size="14" fill="' + mutedColor + '">' + escapeHtml(tb.subtitle) + '</text>'); }
+      if (tb.date) { ty += 18; parts.push('<text x="' + tX + '" y="' + ty + '" font-family="' + fontFamily + '" font-size="11.5" fill="' + mutedColor + '">' + escapeHtml(tb.date) + '</text>'); }
+    }
+
+    // ---- legend ----
+    if (lg && lg.show) {
+      var items = lg.items || [];
+      var lX = lg.x - minX + pad, lY = lg.y - minY + pad;
+      var lw = Math.max(150, lgW || 170);
+      var lh = 20 + (lg.title ? 19 : 0) + items.length * 20;
+      parts.push('<rect x="' + lX + '" y="' + lY + '" width="' + lw + '" height="' + lh + '" rx="10" fill="' + panelBg + '" stroke="' + panelLine + '"/>');
+      var ly = lY + 12;
+      if (lg.title) {
+        ly += 11;
+        parts.push('<text x="' + (lX + 12) + '" y="' + ly + '" font-family="' + fontFamily + '" font-size="10.5" font-weight="700" letter-spacing="1" fill="' + mutedColor + '">' + escapeHtml(String(lg.title).toUpperCase()) + '</text>');
+        ly += 8;
+      }
+      items.forEach(function (it) {
+        ly += 20;
+        if (it.type === 'line') {
+          var da = it.dash === 'dashed' ? '5 4' : (it.dash === 'dotted' ? '1 4' : '');
+          parts.push('<line x1="' + (lX + 12) + '" y1="' + (ly - 4) + '" x2="' + (lX + 34) + '" y2="' + (ly - 4) + '" stroke="' + it.color + '" stroke-width="2.5" stroke-linecap="round"' + (da ? ' stroke-dasharray="' + da + '"' : '') + '/>');
+        } else {
+          parts.push('<rect x="' + (lX + 12) + '" y="' + (ly - 11) + '" width="15" height="15" rx="4" fill="' + it.color + '" stroke="rgba(0,0,0,.12)"/>');
+        }
+        parts.push('<text x="' + (lX + 42) + '" y="' + ly + '" font-family="' + fontFamily + '" font-size="12.5" fill="' + textColorDefault + '">' + escapeHtml(it.label || '') + '</text>');
+      });
+    }
+
     if (defs.length) parts.push('<defs>' + defs.join('') + '</defs>');
     parts.push('</svg>');
     return { svg: parts.join(''), width: W, height: H };
   }
 
+  // Real text measurement, so exported line breaks match what the browser
+  // actually renders on screen instead of a characters-per-line guess.
+  var measureCtx = null;
+  function measureTextWidth(text, fontSize, bold, family) {
+    if (!measureCtx) measureCtx = document.createElement('canvas').getContext('2d');
+    measureCtx.font = (bold ? '700 ' : '400 ') + fontSize + 'px ' + (family || FONT_STACKS.system);
+    return measureCtx.measureText(text).width;
+  }
+
   // Greedy word wrap for SVG text (SVG has no automatic wrapping).
   // Long single words are hard-split so they can never overflow the box.
-  function wrapSvgText(text, maxWidth, fontSize, bold) {
-    var avgChar = fontSize * (bold ? 0.58 : 0.52);
-    var maxChars = Math.max(6, Math.floor(maxWidth / avgChar));
+  function wrapSvgText(text, maxWidth, fontSize, bold, family) {
     var words = String(text || '').trim().split(/\s+/).filter(Boolean);
     var lines = [], cur = '';
+    var fits = function (t) { return measureTextWidth(t, fontSize, bold, family) <= maxWidth; };
     words.forEach(function (w) {
-      while (w.length > maxChars) {
+      // Hard-split a single word too long to fit a line on its own.
+      while (!fits(w) && w.length > 1) {
+        var cut = w.length;
+        while (cut > 1 && !fits(w.slice(0, cut) + '-')) cut--;
+        if (cut <= 1) break;
         if (cur) { lines.push(cur); cur = ''; }
-        lines.push(w.slice(0, maxChars - 1) + '-');
-        w = w.slice(maxChars - 1);
+        lines.push(w.slice(0, cut) + '-');
+        w = w.slice(cut);
       }
       var candidate = cur ? cur + ' ' + w : w;
-      if (candidate.length > maxChars) { if (cur) lines.push(cur); cur = w; }
+      if (cur && !fits(candidate)) { lines.push(cur); cur = w; }
       else cur = candidate;
     });
     if (cur) lines.push(cur);
