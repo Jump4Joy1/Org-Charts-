@@ -1,4 +1,4 @@
-var CACHE = 'orgchart-v8';
+var CACHE = 'orgchart-v9';
 var ASSETS = [
   './',
   './index.html',

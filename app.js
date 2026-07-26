@@ -70,6 +70,122 @@
   // ---------------------------------------------------------------------
   // State
   // ---------------------------------------------------------------------
+  // =====================================================================
+  // Shape geometry
+  //
+  // Every shape is described once, as a normalised outline, and turned into
+  // an SVG path by shapePath(). The card on screen and the exported drawing
+  // both render that same path, so they cannot drift apart — and corner
+  // rounding works on a hexagon exactly as it does on a rectangle.
+  //
+  //  kind 'rect'     — axis-aligned box, radius rounds the four corners
+  //  kind 'poly'     — polygon, radius rounds every vertex
+  //  kind 'ellipse'  — radius is ignored
+  //  kind 'cylinder' — drawn specially: a tube with elliptical ends
+  //
+  // `inset` is the fraction of width/height that the text has to give up so
+  // it stays inside a shape that narrows towards its edges.
+  // =====================================================================
+  var SHAPES = {
+    rounded:       { label: 'Rounded',  kind: 'rect', defRadius: 14 },
+    rect:          { label: 'Square edge', kind: 'rect', defRadius: 0 },
+    pill:          { label: 'Pill',     kind: 'rect', defRadius: 999 },
+    square:        { label: 'Square',   kind: 'rect', defRadius: 6, fixedAspect: true },
+    circle:        { label: 'Circle',   kind: 'ellipse', fixedAspect: true, insetX: 0.16, insetY: 0.16 },
+    diamond:       { label: 'Diamond',  kind: 'poly', defRadius: 6, insetX: 0.22, insetY: 0.22,
+                     pts: [[0.5, 0], [1, 0.5], [0.5, 1], [0, 0.5]] },
+    hexagon:       { label: 'Hexagon',  kind: 'poly', defRadius: 8, insetX: 0.14,
+                     pts: [[0.25, 0], [0.75, 0], [1, 0.5], [0.75, 1], [0.25, 1], [0, 0.5]] },
+    octagon:       { label: 'Octagon',  kind: 'poly', defRadius: 8, insetX: 0.08, insetY: 0.08,
+                     pts: [[0.29, 0], [0.71, 0], [1, 0.29], [1, 0.71], [0.71, 1], [0.29, 1], [0, 0.71], [0, 0.29]] },
+    parallelogram: { label: 'Slant',    kind: 'poly', defRadius: 4, insetX: 0.14,
+                     pts: [[0.18, 0], [1, 0], [0.82, 1], [0, 1]] },
+    trapezoid:     { label: 'Trapezoid', kind: 'poly', defRadius: 6, insetX: 0.14,
+                     pts: [[0.18, 0], [0.82, 0], [1, 1], [0, 1]] },
+    chevron:       { label: 'Chevron',  kind: 'poly', defRadius: 4, insetX: 0.16,
+                     pts: [[0, 0], [0.82, 0], [1, 0.5], [0.82, 1], [0, 1], [0.18, 0.5]] },
+    cylinder:      { label: 'Cylinder', kind: 'cylinder', insetY: 0.12 }
+  };
+  var SHAPE_ORDER = ['rounded', 'rect', 'pill', 'square', 'circle', 'diamond', 'hexagon', 'octagon', 'parallelogram', 'trapezoid', 'chevron', 'cylinder'];
+  function shapeDef(key) { return SHAPES[key] || SHAPES.rounded; }
+  function isFixedAspectShape(key) { return !!shapeDef(key).fixedAspect; }
+  // The radius a box actually draws with: its own override, or the shape's
+  // natural default when it has never been set.
+  function cornerRadius(n) {
+    var d = shapeDef(n && n.shape);
+    if (d.kind === 'ellipse' || d.kind === 'cylinder') return 0;
+    var r = (n && typeof n.corner === 'number') ? n.corner : d.defRadius;
+    return Math.max(0, r || 0);
+  }
+
+  function fmt(v) { return Math.round(v * 100) / 100; }
+
+  // Rounds every vertex of a closed polygon. Each corner is trimmed back
+  // along both of its edges and bridged with a quadratic curve through the
+  // original point; the trim is capped at half the shorter edge so adjacent
+  // corners can never eat into each other.
+  function roundedPolyPath(pts, r) {
+    var n = pts.length;
+    if (!r || r < 0.5) {
+      return 'M ' + pts.map(function (p) { return fmt(p[0]) + ' ' + fmt(p[1]); }).join(' L ') + ' Z';
+    }
+    var d = '';
+    for (var i = 0; i < n; i++) {
+      var prev = pts[(i - 1 + n) % n], cur = pts[i], next = pts[(i + 1) % n];
+      var v1x = prev[0] - cur[0], v1y = prev[1] - cur[1];
+      var v2x = next[0] - cur[0], v2y = next[1] - cur[1];
+      var l1 = Math.sqrt(v1x * v1x + v1y * v1y) || 1;
+      var l2 = Math.sqrt(v2x * v2x + v2y * v2y) || 1;
+      var t = Math.min(r, l1 / 2, l2 / 2);
+      var ax = cur[0] + (v1x / l1) * t, ay = cur[1] + (v1y / l1) * t;
+      var bx = cur[0] + (v2x / l2) * t, by = cur[1] + (v2y / l2) * t;
+      d += (i === 0 ? 'M ' + fmt(ax) + ' ' + fmt(ay) : ' L ' + fmt(ax) + ' ' + fmt(ay));
+      d += ' Q ' + fmt(cur[0]) + ' ' + fmt(cur[1]) + ' ' + fmt(bx) + ' ' + fmt(by);
+    }
+    return d + ' Z';
+  }
+
+  function roundedRectPath(w, h, r) {
+    r = Math.max(0, Math.min(r, Math.min(w, h) / 2));
+    if (r < 0.5) return 'M 0 0 L ' + fmt(w) + ' 0 L ' + fmt(w) + ' ' + fmt(h) + ' L 0 ' + fmt(h) + ' Z';
+    return 'M ' + fmt(r) + ' 0'
+      + ' H ' + fmt(w - r) + ' A ' + fmt(r) + ' ' + fmt(r) + ' 0 0 1 ' + fmt(w) + ' ' + fmt(r)
+      + ' V ' + fmt(h - r) + ' A ' + fmt(r) + ' ' + fmt(r) + ' 0 0 1 ' + fmt(w - r) + ' ' + fmt(h)
+      + ' H ' + fmt(r) + ' A ' + fmt(r) + ' ' + fmt(r) + ' 0 0 1 0 ' + fmt(h - r)
+      + ' V ' + fmt(r) + ' A ' + fmt(r) + ' ' + fmt(r) + ' 0 0 1 ' + fmt(r) + ' 0 Z';
+  }
+
+  function ellipsePath(w, h) {
+    var rx = w / 2, ry = h / 2;
+    return 'M 0 ' + fmt(ry)
+      + ' A ' + fmt(rx) + ' ' + fmt(ry) + ' 0 0 1 ' + fmt(w) + ' ' + fmt(ry)
+      + ' A ' + fmt(rx) + ' ' + fmt(ry) + ' 0 0 1 0 ' + fmt(ry) + ' Z';
+  }
+
+  // A cylinder is the tube outline; the lip across the top is drawn as a
+  // separate stroked arc by the caller.
+  function cylinderLip(w, h) {
+    var ry = Math.min(h * 0.16, w * 0.22);
+    return { ry: ry, lip: 'M 0 ' + fmt(ry) + ' A ' + fmt(w / 2) + ' ' + fmt(ry) + ' 0 0 0 ' + fmt(w) + ' ' + fmt(ry) };
+  }
+  function cylinderPath(w, h) {
+    var ry = cylinderLip(w, h).ry;
+    return 'M 0 ' + fmt(ry)
+      + ' A ' + fmt(w / 2) + ' ' + fmt(ry) + ' 0 0 1 ' + fmt(w) + ' ' + fmt(ry)
+      + ' V ' + fmt(h - ry)
+      + ' A ' + fmt(w / 2) + ' ' + fmt(ry) + ' 0 0 1 0 ' + fmt(h - ry)
+      + ' Z';
+  }
+
+  function shapePath(key, w, h, radius) {
+    var d = shapeDef(key);
+    if (d.kind === 'ellipse') return ellipsePath(w, h);
+    if (d.kind === 'cylinder') return cylinderPath(w, h);
+    if (d.kind === 'rect') return roundedRectPath(w, h, radius);
+    var pts = d.pts.map(function (p) { return [p[0] * w, p[1] * h]; });
+    return roundedPolyPath(pts, radius);
+  }
+
   var state = loadState();
   var undoStack = [];
   var panX = 0, panY = 0, scale = 1;
@@ -151,6 +267,10 @@
       if (!n.width) n.width = NODE_W;
       // 0 / absent means "let the content decide"; a number is an explicit height.
       if (!n.height) n.height = 0;
+      // Older charts stored the look purely in the shape name; give each
+      // one the radius that shape used to imply so nothing shifts.
+      if (typeof n.corner !== 'number') n.corner = shapeDef(n.shape).defRadius || 0;
+      if (!SHAPES[n.shape]) n.shape = 'rounded';
     });
     delete c.settings;
     delete c.autoLayout;
@@ -765,7 +885,7 @@
   // Per-box overrides, with back-compatible defaults for older saved charts.
   function nodeW(n) { return (n && n.width) || NODE_W; }
   function nodeScale(n) { return (n && n.fontScale) || 1; }
-  function isFixedAspect(n) { var s = n && n.shape; return s === 'circle' || s === 'square'; }
+  function isFixedAspect(n) { return isFixedAspectShape(n && n.shape); }
   // The height a box is *forced* to, or 0 when it should size to its content.
   // Circles and squares always mirror their width.
   function forcedH(n) { return isFixedAspect(n) ? nodeW(n) : ((n && n.height) || 0); }
@@ -821,7 +941,12 @@
     el.style.width = w + 'px';
     el.style.height = fh ? fh + 'px' : '';
     el.dataset.fixedh = (fh && !isFixedAspect(n)) ? '1' : '0';
-    el.style.padding = Math.round(10 * fs) + 'px ' + Math.round(12 * fs) + 'px';
+    // Shapes that taper have to give the text some room, or a hexagon's
+    // wording runs straight out through its slanted sides.
+    var sdef = shapeDef(n.shape);
+    var padX = Math.round(12 * fs + w * (sdef.insetX || 0));
+    var padY = Math.round(10 * fs + (fh || NODE_H_APPROX) * (sdef.insetY || 0));
+    el.style.padding = padY + 'px ' + padX + 'px';
     var av = el.querySelector('.avatar');
     var avSize = AVATAR_SIZES[fs] || Math.round(44 * fs);
     av.style.width = avSize + 'px';
@@ -840,19 +965,69 @@
     el.querySelector('.nname').style.fontSize = (14.5 * fs).toFixed(1) + 'px';
     el.querySelector('.ntitle').style.fontSize = (12 * fs).toFixed(1) + 'px';
     el.querySelector('.ndetail').style.fontSize = (11 * fs).toFixed(1) + 'px';
-    var fill = n.fill || defaultFill();
-    if (fill.type === 'gradient') el.style.background = 'linear-gradient(' + fillAngle(fill) + 'deg, ' + (fill.color || '#dfe6f2') + ', ' + (fill.color2 || '#c3d1ea') + ')';
-    else if (fill.type === 'texture') el.style.background = textureCss(fill.texture, fill.color || n.color || '#3568d4', 'var(--panel)');
-    else el.style.background = fill.color || 'var(--panel)';
-    var border = n.border || defaultBorder();
-    el.style.borderColor = border.color || 'var(--line)';
-    el.style.borderWidth = (border.width || 1) + 'px';
-    el.style.borderStyle = border.dash === 'dashed' ? 'dashed' : (border.dash === 'dotted' ? 'dotted' : 'solid');
     el.style.fontFamily = n.font ? FONT_STACKS[n.font] : '';
     var tc = textColorsFor(n);
     el.querySelector('.nname').style.color = tc.name;
     el.querySelector('.ntitle').style.color = tc.title;
     el.querySelector('.ndetail').style.color = tc.title;
+    drawNodeShape(el, n);
+  }
+
+  // Paints the card's outline into its own SVG layer. The card itself is a
+  // transparent box; everything visible — fill, gradient, texture, border —
+  // lives on this path, which is the same path the exporter draws.
+  var shapeSeq = 0;
+  function drawNodeShape(el, n) {
+    var svg = el.querySelector('.shapelayer');
+    if (!svg) return;
+    var w = el.offsetWidth || nodeW(n);
+    var h = el.offsetHeight || NODE_H_APPROX;
+    if (!w || !h) return;
+    var def = shapeDef(n.shape);
+    var border = n.border || defaultBorder();
+    var sw = border.width || 1;
+    // Stroke straddles the path, so inset by half of it to keep the outline
+    // inside the card's own box rather than bleeding over its neighbours.
+    var iw = Math.max(1, w - sw), ih = Math.max(1, h - sw);
+    var fill = n.fill || defaultFill();
+    var uid2 = 's' + (++shapeSeq);
+    var defs = '';
+    var fillAttr;
+    if (fill.type === 'gradient') {
+      var gv = angleVector(fillAngle(fill));
+      defs += '<linearGradient id="' + uid2 + 'g" x1="' + gv.x1 + '" y1="' + gv.y1 + '" x2="' + gv.x2 + '" y2="' + gv.y2 + '">'
+        + '<stop offset="0" stop-color="' + (fill.color || '#dfe6f2') + '"/>'
+        + '<stop offset="1" stop-color="' + (fill.color2 || '#c3d1ea') + '"/></linearGradient>';
+      fillAttr = 'url(#' + uid2 + 'g)';
+    } else if (fill.type === 'texture' && fill.texture !== 'none') {
+      defs += svgPatternDef(uid2 + 'p', fill.texture, fill.color || n.color || '#3568d4', cssVar('--panel'));
+      fillAttr = 'url(#' + uid2 + 'p)';
+    } else {
+      fillAttr = fill.color || cssVar('--panel');
+    }
+    var stroke = border.color || cssVar('--line');
+    var dash = border.dash === 'dashed' ? (sw * 2.5) + ' ' + (sw * 2)
+      : (border.dash === 'dotted' ? '1 ' + (sw * 2.2) : '');
+    var d = shapePath(n.shape, iw, ih, cornerRadius(n));
+    var extra = '';
+    if (def.kind === 'cylinder') {
+      extra = '<path d="' + cylinderLip(iw, ih).lip + '" fill="none" stroke="' + stroke + '" stroke-width="' + sw + '" opacity=".55"/>';
+    }
+    svg.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
+    svg.innerHTML = (defs ? '<defs>' + defs + '</defs>' : '')
+      + '<g transform="translate(' + (sw / 2) + ',' + (sw / 2) + ')">'
+      + '<path d="' + d + '" fill="' + fillAttr + '" stroke="' + stroke + '" stroke-width="' + sw + '"'
+      + (dash ? ' stroke-dasharray="' + dash + '"' : '') + '/>'
+      + extra + '</g>';
+  }
+
+  var cssVarCache = {};
+  function cssVar(name) {
+    if (cssVarCache[name] === undefined || cssVarCache._theme !== document.documentElement.dataset.theme) {
+      cssVarCache._theme = document.documentElement.dataset.theme;
+      cssVarCache[name] = getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#ffffff';
+    }
+    return cssVarCache[name];
   }
 
   function render() {
@@ -874,6 +1049,7 @@
         el.className = 'node';
         el.dataset.id = id;
         el.innerHTML =
+          '<svg class="shapelayer" preserveAspectRatio="none"></svg>' +
           '<div class="avatar"></div>' +
           '<div class="ntext"><div class="nname"></div><div class="ntitle"></div><div class="ndetail"></div></div>' +
           '<div class="handle n" data-dir="n"></div><div class="handle s" data-dir="s"></div>' +
@@ -1566,7 +1742,7 @@
     chart.nodes[id] = {
       id: id, name: '', title: '', detail: '', nickname: '', photo: null, x: x, y: y,
       shape: 'rounded', color: randomColor(), fill: defaultFill(), border: defaultBorder(),
-      font: '', textColor: '', avatarMode: (chart.badges === 'hide' ? 'none' : 'auto'), layout: 'stack', align: 'center', fontScale: 1, width: NODE_W, height: 0, order: Date.now()
+      font: '', textColor: '', avatarMode: (chart.badges === 'hide' ? 'none' : 'auto'), layout: 'stack', align: 'center', fontScale: 1, width: NODE_W, height: 0, corner: 14, order: Date.now()
     };
     return id;
   }
@@ -1831,7 +2007,7 @@
   // Circles and squares are always as tall as they are wide, so the height
   // control would be a lie for them.
   function syncSizeForShape() {
-    var sq = segValue(segShape) === 'circle' || segValue(segShape) === 'square';
+    var sq = isFixedAspectShape(segShape.dataset.value);
     segHeightMode.classList.toggle('off', sq);
     segHeightMode.style.opacity = sq ? '.38' : '';
     segHeightMode.style.pointerEvents = sq ? 'none' : '';
@@ -1871,6 +2047,52 @@
   }
   fFontScale.addEventListener('input', paintFontScale);
 
+  // Shape picker tiles preview the actual outline, generated by shapePath so
+  // the swatch cannot disagree with the card.
+  var fCorner = $('fCorner'), fCornerVal = $('fCornerVal'), cornerRow = $('cornerRow');
+  function shapeTileSvg(key) {
+    var d = shapeDef(key);
+    // Fixed-aspect shapes preview in a square tile, or a circle would read as
+    // an ellipse. Radius is scaled to the tile so a pill still looks like one.
+    var h = 22, w = d.fixedAspect ? 22 : 34;
+    var r = (d.kind === 'rect' || d.kind === 'poly') ? (d.defRadius || 0) * (h / 100) : 0;
+    return '<svg viewBox="-1 -1 ' + (w + 2) + ' ' + (h + 2) + '" width="' + w + '" height="' + h + '">'
+      + '<path d="' + shapePath(key, w, h, r) + '"/></svg>';
+  }
+  function buildShapeGrid(selected) {
+    var box = segShape;
+    box.innerHTML = '';
+    SHAPE_ORDER.forEach(function (key) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.dataset.v = key;
+      if (key === selected) b.classList.add('sel');
+      b.innerHTML = shapeTileSvg(key) + '<span>' + shapeDef(key).label + '</span>';
+      b.addEventListener('click', function () {
+        box.querySelectorAll('button').forEach(function (x) { x.classList.remove('sel'); });
+        b.classList.add('sel');
+        box.dataset.value = key;
+        // Adopt the new shape's natural rounding rather than carrying over a
+        // radius that was chosen for a different outline.
+        fCorner.value = String(Math.min(60, shapeDef(key).defRadius || 0));
+        paintCorner();
+        syncSizeForShape();
+      });
+      box.appendChild(b);
+    });
+    box.dataset.value = selected;
+  }
+  function paintCorner() {
+    var key = segShape.dataset.value || 'rounded';
+    var kind = shapeDef(key).kind;
+    var roundable = (kind === 'rect' || kind === 'poly');
+    cornerRow.classList.toggle('off', !roundable);
+    fCornerVal.textContent = roundable
+      ? (parseInt(fCorner.value, 10) >= 60 ? 'Max' : fCorner.value + ' px')
+      : 'n/a';
+  }
+  fCorner.addEventListener('input', paintCorner);
+
   function openEditSheet(id, focusEmpty) {
     editingId = id;
     var chart = getActiveChart();
@@ -1890,7 +2112,9 @@
     wireSeg($('segAlign'), n.align || 'center');
     setFontScaleControls(n);
     setSizeControls(n);
-    wireSeg(segShape, n.shape || 'rounded', syncSizeForShape);
+    buildShapeGrid(n.shape || 'rounded');
+    fCorner.value = String(Math.min(60, cornerRadius(n)));
+    paintCorner();
     syncSizeForShape();
     var fill = n.fill || defaultFill();
     wireSeg(segFillType, fill.type, updateFillPickerVisibility);
@@ -1930,7 +2154,8 @@
     n.width = clamp(parseInt(fWidth.value, 10) || NODE_W, MIN_W, MAX_W);
     n.height = segValue(segHeightMode) === 'fixed'
       ? clamp(parseInt(fHeight.value, 10) || NODE_H_APPROX, MIN_H, MAX_H) : 0;
-    n.shape = segValue(segShape);
+    n.shape = segShape.dataset.value || 'rounded';
+    n.corner = Math.max(0, parseInt(fCorner.value, 10) || 0);
     n.color = colorPicker.dataset.value;
     n.fill = { type: segValue(segFillType), color: fillColorPicker.dataset.value, color2: fillColor2Picker.dataset.value,
       texture: fillTextureGrid.dataset.value, angle: parseInt(fGradAngle.value, 10) };
@@ -1965,7 +2190,7 @@
   // Each group lists the node properties it copies. Text, photos and
   // positions are deliberately excluded — this only ever copies styling.
   var APPLY_GROUPS = [
-    { key: 'shape', label: 'Shape & card layout', sub: 'Shape, stacked/compact, and text alignment', props: ['shape', 'layout', 'align'] },
+    { key: 'shape', label: 'Shape & card layout', sub: 'Shape, stacked/compact, and text alignment', props: ['shape', 'corner', 'layout', 'align'] },
     { key: 'colors', label: 'Colours', sub: 'Fill, border, text and badge colour', props: ['fill', 'border', 'textColor', 'color'] },
     { key: 'size', label: 'Text size & box size', sub: 'Makes every card a consistent size', props: ['fontScale', 'width', 'height'] },
     { key: 'font', label: 'Font', sub: 'This box’s typeface override', props: ['font'] },
@@ -3128,12 +3353,12 @@
       var accent = n.color || COLOR_SWATCHES[0];
       var shape = n.shape || 'rounded';
       var W = nodeW(n), fs = nodeScale(n);
-      var fixedAspect = (shape === 'circle' || shape === 'square');
+      var sdefX = shapeDef(shape);
+      var fixedAspect = !!sdefX.fixedAspect;
       var boxH = fixedAspect ? W : (n.height || h);
-      // Both a fixed-aspect shape and an explicit height centre their content
-      // vertically, matching what the card does on screen.
-      var centreV = fixedAspect || !!n.height;
-      var rx = shape === 'rect' ? 3 : (shape === 'pill' ? boxH / 2 : (shape === 'circle' ? W / 2 : (shape === 'square' ? 6 : 14)));
+      // Fixed-aspect shapes, explicit heights and the shapes that centre on
+      // screen all centre their content here too.
+      var centreV = fixedAspect || !!n.height || shape === 'diamond' || shape === 'octagon' || shape === 'cylinder';
       var fill = n.fill || defaultFill();
       var fillAttr;
       if (fill.type === 'gradient') {
@@ -3150,11 +3375,21 @@
       } else fillAttr = fill.color || panelBg;
       var border = n.border || defaultBorder();
       var dashArr2 = border.dash === 'dashed' ? (border.width * 2.5) + ' ' + (border.width * 2) : (border.dash === 'dotted' ? '1 ' + (border.width * 2.2) : '');
-      parts.push('<rect x="' + x + '" y="' + y + '" width="' + W + '" height="' + boxH + '" rx="' + rx + '" fill="' + fillAttr + '" stroke="' + (border.color || panelLine) + '" stroke-width="' + (border.width || 1) + '"' + (dashArr2 ? ' stroke-dasharray="' + dashArr2 + '"' : '') + '/>');
+      // Same path generator as the on-screen card, so the two cannot diverge.
+      var swX = border.width || 1;
+      var pathD = shapePath(shape, W - swX, boxH - swX, cornerRadius(n));
+      parts.push('<g transform="translate(' + (x + swX / 2) + ',' + (y + swX / 2) + ')">'
+        + '<path d="' + pathD + '" fill="' + fillAttr + '" stroke="' + (border.color || panelLine) + '" stroke-width="' + swX + '"'
+        + (dashArr2 ? ' stroke-dasharray="' + dashArr2 + '"' : '') + '/>'
+        + (sdefX.kind === 'cylinder'
+            ? '<path d="' + cylinderLip(W - swX, boxH - swX).lip + '" fill="none" stroke="' + (border.color || panelLine) + '" stroke-width="' + swX + '" opacity=".55"/>'
+            : '')
+        + '</g>');
 
       var isRow = (n.layout || 'stack') === 'row';
       var align = n.align || 'center';
-      var padT = 10 * fs, padL = 12 * fs;
+      var padT = 10 * fs + boxH * (sdefX.insetY || 0);
+      var padL = 12 * fs + W * (sdefX.insetX || 0);
       var avR = (AVATAR_SIZES[fs] || 44 * fs) / 2;
       var hasAvatar = showsAvatar(n);
       var nameFont = (n.font ? FONT_STACKS[n.font] : fontFamily).replace(/"/g, "'");
@@ -3177,8 +3412,8 @@
         textLeft = x + padL + (hasAvatar ? badgeW + 10 : 0);
         innerW = W - (textLeft - x) - padL;
       } else {
-        textLeft = x + 10 * fs;
-        innerW = W - 20 * fs;
+        textLeft = x + padL;
+        innerW = W - padL * 2;
       }
       var textAnchor = align === 'left' ? 'start' : (align === 'right' ? 'end' : 'middle');
       var textX = align === 'left' ? textLeft
@@ -3186,8 +3421,8 @@
       // The badge follows the alignment in stacked mode so the card reads as
       // one aligned block; in compact mode it always leads on the left.
       var cx = isRow ? x + padL + badgeW / 2
-        : (align === 'left' ? x + 10 * fs + badgeW / 2
-          : (align === 'right' ? x + W - 10 * fs - badgeW / 2 : x + W / 2));
+        : (align === 'left' ? x + padL + badgeW / 2
+          : (align === 'right' ? x + W - padL - badgeW / 2 : x + W / 2));
 
       var tcx = textColorsFor(n);
       var nameColor = tcx.name || textColorDefault;

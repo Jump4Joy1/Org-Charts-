@@ -91,19 +91,30 @@ svg#edges{position:absolute; left:0; top:0; overflow:visible; pointer-events:non
 svg#guides{position:absolute; left:0; top:0; overflow:visible; pointer-events:none; z-index:40;}
 .guide{stroke:#ff3b8d; stroke-width:1.5; stroke-dasharray:5 4; opacity:.9;}
 
+/* The card is a transparent box; its outline, fill, gradient and border are
+   all painted by .shapelayer, which draws the same SVG path the exporter
+   uses. That's what lets a hexagon (or a rounded hexagon) exist at all —
+   border-radius can only ever describe a rectangle. */
 .node{
   position:absolute; width:168px; touch-action:none; user-select:none;
-  border:1px solid var(--line); box-shadow:var(--shadow); border-radius:14px;
+  border:none; background:none;
   padding:10px 12px; display:flex; flex-direction:column; align-items:center; text-align:center; gap:4px;
-  transition:box-shadow .12s, transform .12s;
+  transition:transform .12s;
 }
-.node.dragging{box-shadow:0 10px 26px rgba(0,0,0,.25); z-index:50; transform:scale(1.03);}
-.node[data-shape="rect"]{border-radius:4px;}
-.node[data-shape="pill"]{border-radius:999px;}
+.node .shapelayer{
+  position:absolute; left:0; top:0; width:100%; height:100%; z-index:0; overflow:visible;
+  pointer-events:none;
+  filter:drop-shadow(0 1px 2px rgba(0,0,0,.10)) drop-shadow(0 3px 8px rgba(0,0,0,.07));
+}
+/* Content rides above the shape. Handles and the grip set their own higher
+   z-index, so they are deliberately not included here. */
+.node .avatar, .node .ntext{position:relative; z-index:1;}
+.node.dragging{z-index:50; transform:scale(1.03);}
+.node.dragging .shapelayer{filter:drop-shadow(0 10px 22px rgba(0,0,0,.28));}
 /* Fixed-aspect shapes get a forced height, so their content is centred
    vertically rather than stacking from the top. */
-.node[data-shape="circle"]{border-radius:50%; justify-content:center; overflow:hidden;}
-.node[data-shape="square"]{border-radius:6px; justify-content:center;}
+.node[data-shape="circle"], .node[data-shape="square"]{justify-content:center;}
+.node[data-shape="diamond"], .node[data-shape="octagon"], .node[data-shape="cylinder"]{justify-content:center;}
 /* A box given an explicit height centres its content too, so the card doesn't
    sit top-heavy in the space the user asked for. Clipping happens on the text
    block rather than the card: overflow:hidden on .node would also swallow the
@@ -394,6 +405,18 @@ svg#guides{position:absolute; left:0; top:0; overflow:visible; pointer-events:no
 .sizerow input[type=range]::-moz-range-thumb{width:22px; height:22px; border-radius:50%; background:var(--panel); border:2px solid var(--accent);}
 .sizehint{font-size:11.5px; color:var(--muted); margin-top:8px; line-height:1.35;}
 
+/* Shape picker: each tile previews the real outline, drawn by the same path
+   generator the cards and exports use, so what you tap is what you get. */
+.shapegrid{display:grid; grid-template-columns:repeat(4,1fr); gap:7px; background:var(--panel2); padding:7px; border-radius:12px;}
+.shapegrid button{
+  border:2px solid transparent; border-radius:9px; background:none; padding:6px 2px 4px;
+  display:flex; flex-direction:column; align-items:center; gap:3px;
+  font-size:10.5px; font-weight:600; color:var(--muted);
+}
+.shapegrid button.sel{border-color:var(--accent); background:var(--panel); color:var(--text);}
+.shapegrid button svg{display:block; height:24px; width:auto;}
+.shapegrid button svg path{fill:color-mix(in srgb, var(--accent) 22%, transparent); stroke:var(--accent); stroke-width:2;}
+
 .gradgrid{display:flex; gap:8px; margin-top:4px; flex-wrap:wrap;}
 .gradswatch{width:52px; height:34px; border-radius:8px; border:2px solid var(--line); flex:0 0 auto; padding:0;}
 .gradswatch.sel{border-color:var(--text);}
@@ -600,12 +623,11 @@ input[type=file]{display:none;}
     <div class="sizehint" id="sizeHint">Or drag the square grip at a box’s bottom-right corner to resize it right on the canvas.</div>
 
     <h4>Shape</h4>
-    <div class="seg" id="segShape">
-      <button data-v="rounded" class="sel">Rounded</button>
-      <button data-v="rect">Rectangle</button>
-      <button data-v="square">Square</button>
-      <button data-v="pill">Pill</button>
-      <button data-v="circle">Circle</button>
+    <div class="shapegrid" id="segShape"></div>
+    <div class="sizerow" id="cornerRow">
+      <label for="fCorner">Corners</label>
+      <input type="range" id="fCorner" min="0" max="60" step="1" value="14">
+      <span class="val" id="fCornerVal">14 px</span>
     </div>
 
     <h4>Text alignment</h4>
