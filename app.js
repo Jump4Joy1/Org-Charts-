@@ -877,11 +877,19 @@
     if (detail) detail.textContent = sub;
     if (menuDot) menuDot.className = cls;
     if (menuLabel) menuLabel.textContent = syncEnabled() ? ('Sync — ' + label.toLowerCase()) : 'Sync across devices';
+    var chip = $('syncChip');
+    if (chip) {
+      chip.className = syncEnabled() ? (syncState.status === 'error' ? 'error' : (syncState.status === 'ok' ? 'ok' : '')) : '';
+      chip.querySelector('.syncdot').className = cls;
+      $('syncChipText').textContent = !syncEnabled() ? 'Sync off'
+        : (syncState.status === 'error' ? 'Sync !' : (syncState.status === 'syncing' ? 'Syncing' : 'Synced'));
+    }
   }
   onSyncChange(refreshSyncUi);
   setInterval(function () { if (syncEnabled()) refreshSyncUi(); }, 15000);
 
   $('syncOpenBtn').addEventListener('click', function () { closeMenu(); setTimeout(openSyncSheet, 120); });
+  $('syncChip').addEventListener('click', openSyncSheet);
   $('syncCloseBtn').addEventListener('click', closeSyncSheet);
   syncBackdrop.addEventListener('click', function (e) { if (e.target === syncBackdrop) closeSyncSheet(); });
 
@@ -919,10 +927,100 @@
     setSyncStatus('syncing');
     syncNow({ announce: false, silentToast: true }).then(function () {
       refreshSyncUi();
-      if (syncState.status === 'error') alert('Sync could not connect:\n\n' + syncState.detail + '\n\nCheck the URL and key, and make sure you ran the SQL in your Supabase project.');
-      else toast('Sync is on');
+      if (syncState.status === 'error') {
+        alert('Sync could not connect:\n\n' + syncState.detail + '\n\nTap "Test connection" for a step-by-step check.');
+      } else {
+        var n = Object.keys(state.charts).length;
+        alert('Sync is on.\n\nThis device now shares ' + n + ' chart' + (n === 1 ? '' : 's') + ' under this code.\n\nOn your other device, open Sync and enter the SAME code, URL and key. Charts only meet if the code matches exactly.');
+      }
     });
   });
+  // A real round trip that names the failing step. "It isn't syncing" is
+  // almost always one of: not set up here, set up with a different code, or
+  // the SQL never run — and each of those looks identical without this.
+  $('syncTestBtn').addEventListener('click', function () {
+    var out = $('syncReport');
+    var url = normalizeUrl($('syncUrl').value);
+    var key = $('syncKey').value.trim();
+    var code = normalizeSyncCode($('syncCode').value);
+    var lines = [];
+    function show() { out.style.display = 'block'; out.textContent = lines.join('\n'); }
+
+    lines.push('Checking…'); show();
+    if (!/^https?:\/\//.test(url) || !key || code.replace(/-/g, '').length < 16) {
+      lines = [
+        (/^https?:\/\//.test(url) ? 'OK  ' : 'X   ') + 'Project URL',
+        (key ? 'OK  ' : 'X   ') + 'Anon key',
+        (code.replace(/-/g, '').length >= 16 ? 'OK  ' : 'X   ') + 'Sync code',
+        '',
+        'Fill in whatever is marked X above, then tap Connect & sync.'
+      ];
+      show();
+      return;
+    }
+    lines = ['OK  Project URL', 'OK  Anon key', 'OK  Sync code (' + code.slice(0, 6) + '…)', '', 'Contacting your project…'];
+    show();
+
+    // Test against the values in the boxes, not the saved ones, so the button
+    // is useful before you have ever connected.
+    var saved = { url: syncCfg.url, key: syncCfg.key, space: syncCfg.space };
+    syncCfg.url = url; syncCfg.key = key; syncCfg.space = code;
+    var probeId = '__probe';
+    var stamp = Date.now();
+
+    syncRpc('oc_push', { p_space: code, p_chart_id: probeId, p_payload: { t: stamp }, p_deleted: false, p_updated_at: stamp })
+      .then(function () {
+        lines[lines.length - 1] = 'OK  Wrote a test record';
+        lines.push('Reading it back…'); show();
+        return syncRpc('oc_pull', { p_space: code, p_since: 0 });
+      })
+      .then(function (rows) {
+        var mine = (rows || []).filter(function (r) { return r.chart_id !== probeId; });
+        var probe = (rows || []).find(function (r) { return r.chart_id === probeId; });
+        lines[lines.length - 1] = probe ? 'OK  Read it back' : 'X   Wrote, but could not read back';
+        lines.push('');
+        lines.push('This sync code holds ' + mine.length + ' chart' + (mine.length === 1 ? '' : 's') + '.');
+        if (!mine.length) {
+          lines.push('');
+          lines.push('Nothing is stored under this code yet. If your other');
+          lines.push('device has charts, it is either not connected or is');
+          lines.push('using a DIFFERENT code — copy this exact code to it.');
+        } else {
+          lines.push('');
+          mine.slice(0, 8).forEach(function (r) {
+            var nm = (r.payload && r.payload.name) || (r.deleted ? '(deleted)' : '(unnamed)');
+            lines.push('  \u2022 ' + nm);
+          });
+          lines.push('');
+          lines.push('If those are missing here, tap Sync now.');
+        }
+        show();
+        // clean the probe up; failure to delete is not worth reporting
+        return syncRpc('oc_push', { p_space: code, p_chart_id: probeId, p_payload: null, p_deleted: true, p_updated_at: stamp + 1 }).catch(function () {});
+      })
+      .catch(function (err) {
+        var msg = (err && err.message) || 'unknown error';
+        lines[lines.length - 1] = 'X   ' + msg;
+        lines.push('');
+        if (/Setup step missing|Could not find/i.test(msg)) {
+          lines.push('The database functions are not there. Copy the SQL');
+          lines.push('below into your Supabase SQL Editor and press Run,');
+          lines.push('then test again.');
+        } else if (/rejected|API key|JWT/i.test(msg)) {
+          lines.push('The URL or the anon key is wrong. Both come from');
+          lines.push('Supabase > Project Settings > API. Use the "anon');
+          lines.push('public" key, not the service role key.');
+        } else {
+          lines.push('Could not reach the project. Check the URL and that');
+          lines.push('this device is online.');
+        }
+        show();
+      })
+      .then(function () {
+        syncCfg.url = saved.url; syncCfg.key = saved.key; syncCfg.space = saved.space;
+      });
+  });
+
   $('syncNowBtn').addEventListener('click', function () {
     if (!syncEnabled()) { toast('Set up sync first'); return; }
     syncNow({ announce: true });
