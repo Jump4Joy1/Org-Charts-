@@ -4237,14 +4237,18 @@
     box.innerHTML = '';
     // Native handlers only. A web page cannot place a call itself, and a
     // Twilio key in the page would be readable by anyone who loads it.
+    var ICON_CALL = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 4h3.5l1.8 4.5-2 1.6a12 12 0 0 0 6.1 6.1l1.6-2 4.5 1.8v3.5a1.5 1.5 0 0 1-1.6 1.5A17 17 0 0 1 3 5.6 1.5 1.5 0 0 1 4.5 4Z"/></svg>';
+    var ICON_TEXT = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a8 8 0 0 1-8 8H6l-3 3 .6-4.2A8 8 0 1 1 21 12Z"/></svg>';
+    var ICON_WHATSAPP = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="color:#2fa96b;"><path d="M21 12a8 8 0 0 1-8 8H6l-3 3 .6-4.2A8 8 0 1 1 21 12Z"/><circle cx="9" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="13" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="17" cy="12" r="1" fill="currentColor" stroke="none"/></svg>';
+    var ICON_EMAIL = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>';
     var acts = [];
     if (o.contact.phone) {
       var tel = o.contact.phone.replace(/[^\d+]/g, '');
-      acts.push({ label: '📞 Call', href: 'tel:' + tel });
-      acts.push({ label: '💬 Text', href: 'sms:' + tel });
-      acts.push({ label: '🟢 WhatsApp', href: 'https://wa.me/' + tel.replace(/\D/g, '') });
+      acts.push({ icon: ICON_CALL, label: 'Call', href: 'tel:' + tel });
+      acts.push({ icon: ICON_TEXT, label: 'Text', href: 'sms:' + tel });
+      acts.push({ icon: ICON_WHATSAPP, label: 'WhatsApp', href: 'https://wa.me/' + tel.replace(/\D/g, '') });
     }
-    if (o.contact.email) acts.push({ label: '✉️ Email', href: 'mailto:' + o.contact.email });
+    if (o.contact.email) acts.push({ icon: ICON_EMAIL, label: 'Email', href: 'mailto:' + o.contact.email });
     if (!acts.length) {
       box.innerHTML = '<span class="smallmuted">No phone or email on this box yet. Open it and add one under Ops.</span>';
     }
@@ -4256,7 +4260,7 @@
       b.style.padding = '12px 14px';
       b.href = a.href;
       b.rel = 'noopener';
-      b.textContent = a.label;
+      b.innerHTML = a.icon + a.label;
       box.appendChild(b);
     });
     quickBackdrop.classList.add('show');

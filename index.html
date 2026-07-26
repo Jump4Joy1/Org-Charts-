@@ -72,8 +72,8 @@ body{
 
 /* ---- Top bar ---- */
 #topbar{
-  flex:0 0 auto; display:flex; align-items:center; gap:8px;
-  padding:calc(var(--safe-top) + 10px) calc(var(--safe-right) + 12px) 10px calc(var(--safe-left) + 12px);
+  flex:0 0 auto; display:flex; align-items:center; gap:5px;
+  padding:calc(var(--safe-top) + 10px) calc(var(--safe-right) + 10px) 10px calc(var(--safe-left) + 10px);
   background:var(--panel); border-bottom:1px solid var(--line); box-shadow:var(--shadow); z-index:20;
 }
 #chartName{
@@ -82,19 +82,25 @@ body{
 }
 #chartName:focus{background:var(--panel2); outline:none;}
 /* Sync state has to be visible without opening a menu — "off" was silent
-   before, which reads as "broken" when charts don't appear elsewhere. */
+   before, which reads as "broken" when charts don't appear elsewhere. Idle it
+   is just the dot, so it costs almost no width next to the chart name; an
+   error is the one state worth spending space on, so only that state grows
+   into the pill with a label. */
 #syncChip{
   flex:0 0 auto; display:flex; align-items:center; gap:5px; border:none; border-radius:20px;
-  background:var(--panel2); color:var(--muted); font-size:11.5px; font-weight:700;
-  padding:6px 8px; white-space:nowrap; overflow:hidden;
+  background:none; color:var(--muted); font-size:11.5px; font-weight:700;
+  padding:8px 2px; white-space:nowrap; overflow:hidden;
 }
 #syncChip #syncChipText{display:none;}
 #syncChip.ok .syncdot{background:#2f9e6e;}
-#syncChip.error{color:var(--danger); background:color-mix(in srgb, var(--danger) 16%, var(--panel2));}
+#syncChip.error{
+  color:var(--danger); background:color-mix(in srgb, var(--danger) 16%, var(--panel2));
+  padding:6px 10px; border-radius:20px;
+}
 #syncChip.error #syncChipText{display:inline;}
 .iconbtn{
-  flex:0 0 auto; width:38px; height:38px; border-radius:10px; border:none; background:var(--panel2);
-  color:var(--text); font-size:18px; display:flex; align-items:center; justify-content:center; cursor:pointer;
+  flex:0 0 auto; width:34px; height:34px; border-radius:10px; border:none; background:var(--panel2);
+  color:var(--text); font-size:17px; display:flex; align-items:center; justify-content:center; cursor:pointer;
 }
 .iconbtn:active{background:var(--line);}
 
@@ -177,8 +183,8 @@ svg#guides{position:absolute; left:0; top:0; overflow:visible; pointer-events:no
 /* Connector handles: visually light so big charts stay readable, but with a
    generous invisible touch target (::before) so they're still easy to grab. */
 .handle{
-  position:absolute; width:13px; height:13px; border-radius:50%;
-  background:var(--panel); border:2px solid var(--accent); opacity:.5;
+  position:absolute; width:10px; height:10px; border-radius:50%;
+  background:var(--panel); border:1.5px solid var(--accent); opacity:.32;
   display:flex; align-items:center; justify-content:center; z-index:8; touch-action:none;
   transition:opacity .15s, transform .15s;
 }
@@ -187,18 +193,18 @@ svg#guides{position:absolute; left:0; top:0; overflow:visible; pointer-events:no
   width:40px; height:40px; transform:translate(-50%,-50%); border-radius:50%;
 }
 .handle:active{opacity:1; transform:scale(1.35);}
-.node:active .handle, .node.dragging .handle{opacity:.95;}
-.handle.n{left:50%; top:-7px; margin-left:-6.5px;}
-.handle.s{left:50%; bottom:-7px; margin-left:-6.5px;}
-.handle.e{right:-7px; top:50%; margin-top:-6.5px;}
-.handle.w{left:-7px; top:50%; margin-top:-6.5px;}
+.node:active .handle, .node.dragging .handle{opacity:.85;}
+.handle.n{left:50%; top:-5px; margin-left:-5px;}
+.handle.s{left:50%; bottom:-5px; margin-left:-5px;}
+.handle.e{right:-5px; top:50%; margin-top:-5px;}
+.handle.w{left:-5px; top:50%; margin-top:-5px;}
 .handle.n:active,.handle.s:active,.handle.e:active,.handle.w:active{transform:scale(1.35);}
 
 /* Bottom-right grip for resizing a box directly on the canvas. Square rather
    than round so it reads differently from the connector handles. */
 .szgrip{
-  position:absolute; right:-8px; bottom:-8px; width:16px; height:16px; border-radius:5px;
-  background:var(--panel); border:2px solid var(--accent); opacity:.45; z-index:9; touch-action:none;
+  position:absolute; right:-6px; bottom:-6px; width:12px; height:12px; border-radius:4px;
+  background:var(--panel); border:1.5px solid var(--accent); opacity:.3; z-index:9; touch-action:none;
   transition:opacity .15s, transform .15s;
 }
 .szgrip::before{
@@ -206,7 +212,7 @@ svg#guides{position:absolute; left:0; top:0; overflow:visible; pointer-events:no
   width:42px; height:42px; transform:translate(-50%,-50%); border-radius:50%;
 }
 .szgrip:active{opacity:1; transform:scale(1.25);}
-.node:active .szgrip, .node.dragging .szgrip, .node.resizing .szgrip{opacity:.95;}
+.node:active .szgrip, .node.dragging .szgrip, .node.resizing .szgrip{opacity:.85;}
 /* Circles clip their own overflow, so the grip has to sit inside the rim. */
 .node[data-shape="circle"] .szgrip{right:11%; bottom:11%;}
 .node.resizing{z-index:50; box-shadow:0 10px 26px rgba(0,0,0,.25);}
@@ -417,6 +423,7 @@ svg#guides{position:absolute; left:0; top:0; overflow:visible; pointer-events:no
 .btn.secondary{background:var(--panel2); color:var(--text);}
 .btn.danger{background:var(--danger); color:#fff;}
 .btn.ghost{background:none; color:var(--accent); flex:0 0 auto;}
+.btn svg{vertical-align:-3px; margin-right:7px;}
 
 .seg{display:flex; gap:6px; background:var(--panel2); padding:4px; border-radius:12px; flex-wrap:wrap;}
 .seg button{
@@ -592,7 +599,9 @@ input[type=file]{display:none;}
 <body>
 <div id="app">
   <div id="topbar">
-    <button class="iconbtn" id="menuBtn" aria-label="Menu">☰</button>
+    <button class="iconbtn" id="menuBtn" aria-label="Menu">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 6h16"/><path d="M4 12h16"/><path d="M4 18h16"/></svg>
+    </button>
     <button id="syncChip" aria-label="Sync status"><span class="syncdot"></span><span id="syncChipText">Sync off</span></button>
     <input id="chartName" maxlength="60" spellcheck="false" autocomplete="off">
     <button class="iconbtn" id="designBtn" aria-label="Chart style">
@@ -621,9 +630,15 @@ input[type=file]{display:none;}
     <button id="searchFab" aria-label="Find a box">
       <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4.2-4.2"/></svg>
     </button>
-    <button id="fitbtn" aria-label="Fit to screen">⤢</button>
-    <button id="groupFab" aria-label="Add department container">▢</button>
-    <button id="noteFab" aria-label="Add note">🗒</button>
+    <button id="fitbtn" aria-label="Fit to screen">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3H5a2 2 0 0 0-2 2v4"/><path d="M15 3h4a2 2 0 0 1 2 2v4"/><path d="M9 21H5a2 2 0 0 1-2-2v-4"/><path d="M15 21h4a2 2 0 0 0 2-2v-4"/></svg>
+    </button>
+    <button id="groupFab" aria-label="Add department container">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="3" stroke-dasharray="3 3"/><path d="M12 9v6"/><path d="M9 12h6"/></svg>
+    </button>
+    <button id="noteFab" aria-label="Add note">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l5 5v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/><path d="M14 3v5h5"/><path d="M8 13h7"/><path d="M8 17h5"/></svg>
+    </button>
     <button id="fab" aria-label="Add box">+</button>
   </div>
 </div>
@@ -827,10 +842,10 @@ input[type=file]{display:none;}
       <button class="btn secondary" id="fDuplicate">⧉ Duplicate</button>
     </div>
     <div class="btnrow">
-      <button class="btn secondary" id="fApplyAll" style="flex:1;">⇊ Apply this look to all boxes</button>
+      <button class="btn secondary" id="fApplyAll" style="flex:1;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 6l5 5 5-5"/><path d="M7 13l5 5 5-5"/></svg>Apply this look to all boxes</button>
     </div>
     <div class="btnrow">
-      <button class="btn secondary" id="fAddNote">🗒 Add note</button>
+      <button class="btn secondary" id="fAddNote"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l5 5v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/><path d="M14 3v5h5"/><path d="M8 13h7"/><path d="M8 17h5"/></svg>Add note</button>
       <button class="btn danger" id="fDelete">Delete box</button>
     </div>
     <button class="btn ghost" id="fCancel" style="margin-top:8px;">Cancel</button>
@@ -949,7 +964,7 @@ input[type=file]{display:none;}
 
     <div class="btnrow">
       <button class="btn" id="eSave">Save</button>
-      <button class="btn secondary" id="eAddNote">🗒 Add note</button>
+      <button class="btn secondary" id="eAddNote"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l5 5v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/><path d="M14 3v5h5"/><path d="M8 13h7"/><path d="M8 17h5"/></svg>Add note</button>
     </div>
     <div class="btnrow">
       <button class="btn danger" id="eDelete">Delete line</button>
@@ -999,15 +1014,15 @@ input[type=file]{display:none;}
     </div>
     <div class="divider"></div>
     <div class="btnrow">
-      <button class="btn secondary" id="designOpenBtn">🎨 Chart style</button>
-      <button class="btn secondary" id="exportOpenBtn">⭳ Export &amp; share</button>
+      <button class="btn secondary" id="designOpenBtn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r="1.2" fill="currentColor" stroke="none"/><circle cx="17.5" cy="10.5" r="1.2" fill="currentColor" stroke="none"/><circle cx="8.5" cy="7.5" r="1.2" fill="currentColor" stroke="none"/><circle cx="6.5" cy="12.5" r="1.2" fill="currentColor" stroke="none"/><path d="M12 2a10 10 0 1 0 3.5 19.4c1-.37 1-1.7.1-2.24-.6-.36-.9-1.05-.66-1.7a1.7 1.7 0 0 1 1.6-1.1H18a4 4 0 0 0 4-4c0-5.5-4.5-10-10-10Z"/></svg>Chart style</button>
+      <button class="btn secondary" id="exportOpenBtn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M7 8l5-5 5 5"/><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></svg>Export &amp; share</button>
     </div>
     <div class="btnrow">
-      <button class="btn secondary" id="paletteOpenBtn" style="flex:1;">🎨 Colour sets</button>
+      <button class="btn secondary" id="paletteOpenBtn" style="flex:1;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r="1.2" fill="currentColor" stroke="none"/><circle cx="17.5" cy="10.5" r="1.2" fill="currentColor" stroke="none"/><circle cx="8.5" cy="7.5" r="1.2" fill="currentColor" stroke="none"/><circle cx="6.5" cy="12.5" r="1.2" fill="currentColor" stroke="none"/><path d="M12 2a10 10 0 1 0 3.5 19.4c1-.37 1-1.7.1-2.24-.6-.36-.9-1.05-.66-1.7a1.7 1.7 0 0 1 1.6-1.1H18a4 4 0 0 0 4-4c0-5.5-4.5-10-10-10Z"/></svg>Colour sets</button>
     </div>
     <div class="btnrow">
-      <button class="btn secondary" id="busFactorBtn">🕳 Succession view</button>
-      <button class="btn secondary" id="proOpenBtn">⭐ Pro</button>
+      <button class="btn secondary" id="busFactorBtn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="2.3"/><path d="M12 7.3V12"/><circle cx="6" cy="19" r="2.3"/><circle cx="18" cy="19" r="2.3"/><path d="M12 12L6 16.7"/><path d="M12 12l6 4.7" stroke-dasharray="2 3"/></svg>Succession view</button>
+      <button class="btn secondary" id="proOpenBtn"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none" style="color:#e0a538;"><path d="M12 2.5l2.9 6.4 7 .7-5.3 4.8 1.6 6.9-6.2-3.6-6.2 3.6 1.6-6.9-5.3-4.8 7-.7z"/></svg>Pro</button>
     </div>
     <div class="btnrow">
       <button class="btn secondary" id="syncOpenBtn" style="flex:1;"><span class="syncdot" id="menuSyncDot"></span> <span id="menuSyncLabel">Sync across devices</span></button>
@@ -1054,7 +1069,7 @@ input[type=file]{display:none;}
     </div>
 
     <div class="btnrow" style="margin-top:0;">
-      <button class="btn secondary" id="titleOpenBtn" style="flex:1;">🏷 Title block &amp; legend</button>
+      <button class="btn secondary" id="titleOpenBtn" style="flex:1;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11.5V5a2 2 0 0 1 2-2h6.5a2 2 0 0 1 1.4.6l8 8a2 2 0 0 1 0 2.8l-6.6 6.6a2 2 0 0 1-2.8 0l-8-8a2 2 0 0 1-.5-1.4Z"/><circle cx="8" cy="8" r="1.3" fill="currentColor" stroke="none"/></svg>Title block &amp; legend</button>
     </div>
 
     <h4>Connector lines</h4>
@@ -1272,7 +1287,7 @@ input[type=file]{display:none;}
     <div class="colors" id="palSwatches"></div>
     <div class="btnrow" style="margin-top:8px;">
       <button class="btn secondary" id="palAddColor">+ Add colour</button>
-      <button class="btn secondary" id="palFromImage">🖼 From a picture</button>
+      <button class="btn secondary" id="palFromImage"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><circle cx="8.5" cy="9.5" r="1.6"/><path d="M3 16l5-5 4 4 3-3 6 6"/></svg>From a picture</button>
     </div>
     <p class="smallmuted">“From a picture” reads a logo or photo and pulls out the colours it actually uses — you can then delete any you don’t want before saving.</p>
     <div class="btnrow">
@@ -1301,7 +1316,7 @@ input[type=file]{display:none;}
       <button class="btn secondary" id="syncSaveProjectBtn" style="flex:1;">Save project details</button>
     </div>
     <div class="btnrow">
-      <button class="btn secondary" id="syncTestBtn" style="flex:1;">🩺 Test connection</button>
+      <button class="btn secondary" id="syncTestBtn" style="flex:1;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2-7 4 14 2-7h6"/></svg>Test connection</button>
     </div>
     <div id="syncReport" class="sqlbox" style="display:none;"></div>
 
