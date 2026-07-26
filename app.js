@@ -1033,6 +1033,16 @@
       inEl.style.display = signedIn() ? 'block' : 'none';
       outEl.style.display = signedIn() ? 'none' : 'block';
       if (signedIn()) $('authWho').textContent = syncCfg.email;
+      // Signing in needs a project to sign in to. Judge by what is typed in
+      // the fields, not by what has been saved: otherwise the button stays
+      // grey while the details are sitting right there on screen.
+      var typedUrl = ($('syncUrl').value || '').trim();
+      var typedKey = ($('syncKey').value || '').trim();
+      var ready = /^https?:\/\//.test(typedUrl) && !!typedKey;
+      var needs = $('authNeedsProject');
+      if (needs) needs.style.display = ready ? 'none' : 'block';
+      var btn = $('authSendBtn');
+      if (btn) btn.disabled = !ready;
     }
   }
   onSyncChange(refreshSyncUi);
@@ -1063,7 +1073,7 @@
     var box = $('projectLinks');
     if (!box) return;
     if (!ref) {
-      box.innerHTML = '<span class="smallmuted">Paste your Project URL above and direct links to the right Supabase pages will appear here.</span>';
+      box.innerHTML = '<span class="smallmuted" style="grid-column:1/-1;">Paste your Project URL above and direct links to the right Supabase pages will appear here.</span>';
       return;
     }
     var base = 'https://supabase.com/dashboard/project/' + ref;
@@ -1075,7 +1085,8 @@
       return '<a class="btn secondary" style="text-decoration:none;text-align:center;padding:10px 12px;" target="_blank" rel="noopener" href="' + l[1] + '">' + l[0] + '</a>';
     }).join('');
   }
-  $('syncUrl').addEventListener('input', refreshProjectLinks);
+  $('syncUrl').addEventListener('input', function () { refreshProjectLinks(); refreshSyncUi(); });
+  $('syncKey').addEventListener('input', function () { refreshSyncUi(); });
 
   function saveProjectFields() {
     var url = normalizeUrl($('syncUrl').value);

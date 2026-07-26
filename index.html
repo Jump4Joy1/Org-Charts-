@@ -1291,9 +1291,24 @@ input[type=file]{display:none;}
     <div id="syncStatusLine"><span class="syncdot" id="syncDot"></span><span id="syncStatusText">Not set up</span></div>
     <div id="syncStatusDetail"></div>
 
+    <h4>Your Supabase project</h4>
+    <p class="smallmuted" style="margin-top:0;">Set once per device, from the same project on both.</p>
+    <div class="field"><label>Project URL</label><input id="syncUrl" placeholder="https://abcdefg.supabase.co" autocapitalize="off" autocorrect="off" spellcheck="false"></div>
+    <div class="field"><label>Anon public key</label><input id="syncKey" placeholder="eyJhbGciOi…" autocapitalize="off" autocorrect="off" spellcheck="false"></div>
+    <p class="smallmuted" style="margin:8px 0 4px;">Straight to the pages you need:</p>
+    <div class="quickgrid" id="projectLinks" style="grid-template-columns:repeat(3,1fr);"></div>
+    <div class="btnrow">
+      <button class="btn secondary" id="syncSaveProjectBtn" style="flex:1;">Save project details</button>
+    </div>
+    <div class="btnrow">
+      <button class="btn secondary" id="syncTestBtn" style="flex:1;">🩺 Test connection</button>
+    </div>
+    <div id="syncReport" class="sqlbox" style="display:none;"></div>
+
     <div id="signedOutBlock">
       <h4>Sign in</h4>
       <p class="smallmuted" style="margin-top:0;">Use the same email on every device and your charts follow you. No codes to copy.</p>
+      <div class="sizehint" id="authNeedsProject" style="display:none;margin-top:0;">Fill in the Project URL and key above first. Sign-in goes through your own Supabase project.</div>
       <div class="field"><label>Email</label><input id="authEmail" type="email" placeholder="you@example.com" autocapitalize="off" autocorrect="off" spellcheck="false"></div>
       <div class="btnrow" style="margin-top:0;">
         <button class="btn" id="authSendBtn" style="flex:1;">Email me a sign-in code</button>
@@ -1320,19 +1335,6 @@ input[type=file]{display:none;}
       </div>
     </div>
 
-    <h4>Your Supabase project</h4>
-    <p class="smallmuted" style="margin-top:0;">Set once per device, from the same project on both.</p>
-    <div class="field"><label>Project URL</label><input id="syncUrl" placeholder="https://abcdefg.supabase.co" autocapitalize="off" autocorrect="off" spellcheck="false"></div>
-    <div class="field"><label>Anon public key</label><input id="syncKey" placeholder="eyJhbGciOi…" autocapitalize="off" autocorrect="off" spellcheck="false"></div>
-    <p class="smallmuted" style="margin:8px 0 4px;">Straight to the pages you need:</p>
-    <div class="quickgrid" id="projectLinks" style="grid-template-columns:repeat(3,1fr);"></div>
-    <div class="btnrow">
-      <button class="btn secondary" id="syncSaveProjectBtn" style="flex:1;">Save project details</button>
-    </div>
-    <div class="btnrow">
-      <button class="btn secondary" id="syncTestBtn" style="flex:1;">🩺 Test connection</button>
-    </div>
-    <div id="syncReport" class="sqlbox" style="display:none;"></div>
 
     <div class="divider"></div>
     <h4>Webhook</h4>
