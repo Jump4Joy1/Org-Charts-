@@ -1299,7 +1299,11 @@ input[type=file]{display:none;}
         <button class="btn" id="authSendBtn" style="flex:1;">Email me a sign-in code</button>
       </div>
       <div id="authCodeBlock" style="display:none;">
-        <div class="field" style="margin-top:12px;"><label>6-digit code from the email</label><input id="authCode" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" maxlength="8"></div>
+        <div class="field" style="margin-top:12px;">
+          <label>Code or link from the email</label>
+          <input id="authCode" autocomplete="one-time-code" autocapitalize="off" spellcheck="false" placeholder="123456 or paste the whole link">
+        </div>
+        <div class="sizehint" style="margin-top:-6px;">Whatever the email contains works. If it has a 6-digit code, type it. If it has a “Log in” link, long press the link, Copy, and paste it here.</div>
         <div class="btnrow" style="margin-top:0;">
           <button class="btn" id="authVerifyBtn">Sign in</button>
           <button class="btn secondary" id="authResendBtn">Resend</button>
@@ -1320,6 +1324,8 @@ input[type=file]{display:none;}
     <p class="smallmuted" style="margin-top:0;">Set once per device, from the same project on both.</p>
     <div class="field"><label>Project URL</label><input id="syncUrl" placeholder="https://abcdefg.supabase.co" autocapitalize="off" autocorrect="off" spellcheck="false"></div>
     <div class="field"><label>Anon public key</label><input id="syncKey" placeholder="eyJhbGciOi…" autocapitalize="off" autocorrect="off" spellcheck="false"></div>
+    <p class="smallmuted" style="margin:8px 0 4px;">Straight to the pages you need:</p>
+    <div class="quickgrid" id="projectLinks" style="grid-template-columns:repeat(3,1fr);"></div>
     <div class="btnrow">
       <button class="btn secondary" id="syncSaveProjectBtn" style="flex:1;">Save project details</button>
     </div>
@@ -1342,13 +1348,13 @@ input[type=file]{display:none;}
     <h4>One-time setup</h4>
     <p class="smallmuted" style="margin-top:0;">Do this once, on either device. It’s free and needs no card.</p>
     <ol class="setupsteps">
-      <li>Go to <code>supabase.com</code>, sign up, and create a project. Wait for it to finish setting up.</li>
-      <li>Open <b>SQL Editor</b>, paste the block below, press Run.</li>
-      <li>Open <b>Authentication → Email Templates → Magic Link</b> and make sure the message contains <code>{{ .Token }}</code> — that is the 6-digit code the app asks for. Paste this as the body:<br><code>Your OrgChart sign-in code is {{ .Token }}</code></li>
-      <li>Open <b>Project Settings → API</b>, copy the <b>Project URL</b> and the <b>anon public</b> key into the two fields above, then Save project details.</li>
-      <li>Enter your email, tap <b>Email me a sign-in code</b>, and type the code in.</li>
-      <li>On your other device: same URL and key, same email. That’s it.</li>
+      <li>Go to <code>supabase.com</code>, sign up, and create a project. Any name, any region, free plan. Wait for it to finish setting up.</li>
+      <li>In the project, open <b>Project Settings → API</b>. Copy the <b>Project URL</b> and the <b>anon public</b> key into the two fields above, then tap <b>Save project details</b>. Direct links to the remaining pages will appear.</li>
+      <li>Tap <b>SQL Editor</b> above, paste the SQL from the button below, press Run. It should say Success.</li>
+      <li>Come back here, enter your email, and tap <b>Email me a sign-in code</b>. Paste whatever the email gives you, a code or the link.</li>
+      <li>On your other device: same URL, same key, same email. That is the whole thing.</li>
     </ol>
+    <p class="smallmuted">Editing the email template is optional. The app accepts the stock sign-in link as well as a code.</p>
     <button class="btn secondary" id="syncSqlCopyBtn" style="margin-top:10px;">Copy the SQL</button>
     <div class="sqlbox" id="syncSqlBox"></div>
     <p class="smallmuted">Your charts live in your own Supabase project — not mine, and not on any server I control. Only your signed-in account can read them. Signing out leaves this device’s charts untouched.</p>

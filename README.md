@@ -84,14 +84,18 @@ code to copy.
 Sync uses a Supabase project that **you** own, so your charts are never on a
 server the author controls. One-time setup, free, no card:
 
-1. Create a project at supabase.com.
-2. SQL Editor, paste the block from `supabase-setup.sql` (the app has a copy
+1. Create a project at supabase.com. Any name, any region, free plan.
+2. Project Settings · API: copy the **Project URL** and the **anon public** key
+   into the app's sync sheet, then Save project details. Direct links to the
+   remaining pages appear once the URL is in.
+3. SQL Editor: paste the block from `supabase-setup.sql` (the app has a copy
    button), Run.
-3. Authentication · Email Templates · Magic Link: make sure the body contains
-   `{{ .Token }}`, which is the 6-digit code the app asks for.
-4. Project Settings · API: copy the Project URL and anon public key into the
-   app's sync sheet.
-5. Enter your email, get the code, sign in. Repeat 4 and 5 on the other device.
+4. Enter your email, tap the button, and paste back whatever the email gives
+   you. A 6-digit code and the stock sign-in link both work.
+5. Same URL, key and email on the other device.
+
+Editing the email template is optional. The app parses the token out of the
+stock magic link, so there is no need to go and add `{{ .Token }}`.
 
 Rows are tied to your account with row-level security, so the anon key alone
 reads nothing. Pushes go out about a second after you stop editing; pulls run

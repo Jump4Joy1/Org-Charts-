@@ -550,8 +550,37 @@
   function authRequestCode(email) {
     return httpJson('/auth/v1/otp', { bearer: syncCfg.key, body: { email: email, create_user: true } });
   }
-  function authVerifyCode(email, code) {
-    return httpJson('/auth/v1/verify', { bearer: syncCfg.key, body: { email: email, token: code, type: 'email' } })
+  /**
+   * Accepts either the 6-digit code or the whole sign-in link pasted out of
+   * the email. Supabase's stock template sends a link, and requiring people
+   * to go and edit that template was the single most fragile setup step;
+   * the link carries the same token in its query string.
+   */
+  function parseSignInInput(raw) {
+    var v = String(raw || '').trim();
+    if (/^\d{6,8}$/.test(v.replace(/\D/g, '')) && !/https?:/i.test(v)) {
+      return { kind: 'otp', token: v.replace(/\D/g, '') };
+    }
+    if (/https?:\/\//i.test(v)) {
+      var m = v.match(/[?&]token(?:_hash)?=([^&\s]+)/i);
+      if (m) {
+        var type = (v.match(/[?&]type=([^&\s]+)/i) || [])[1] || 'magiclink';
+        return { kind: 'hash', token: decodeURIComponent(m[1]), type: decodeURIComponent(type) };
+      }
+      // Some clients wrap the link; fall through to a bare-token attempt.
+    }
+    var bare = v.replace(/\s+/g, '');
+    if (bare.length >= 6) return { kind: bare.length > 10 ? 'hash' : 'otp', token: bare, type: 'magiclink' };
+    return null;
+  }
+
+  function authVerifyCode(email, input) {
+    var parsed = typeof input === 'object' ? input : parseSignInInput(input);
+    if (!parsed) return Promise.reject(new Error('Paste the code or the whole sign-in link from the email'));
+    var body = parsed.kind === 'hash'
+      ? { token_hash: parsed.token, type: parsed.type || 'magiclink' }
+      : { email: email, token: parsed.token, type: 'email' };
+    return httpJson('/auth/v1/verify', { bearer: syncCfg.key, body: body })
       .then(function (data) {
         if (!data || !data.access_token) throw new Error('That code was not accepted');
         syncCfg.email = email;
@@ -953,6 +982,7 @@
     $('authEmail').value = syncCfg.email || '';
     $('syncSqlBox').textContent = SYNC_SQL;
     $('webhookUrl').value = prefs.webhook || '';
+    refreshProjectLinks();
     refreshSyncUi();
     syncBackdrop.classList.add('show');
     syncSheet.classList.add('show');
@@ -1019,6 +1049,34 @@
     } else toast('Could not copy — select it by hand');
   });
 
+  /**
+   * The project reference is the subdomain of the API URL, and every
+   * dashboard page is /dashboard/project/<ref>/<page>. Deriving these saves
+   * hunting through the Supabase UI.
+   */
+  function projectRef(url) {
+    var m = String(url || '').match(/^https?:\/\/([a-z0-9]+)\.supabase\./i);
+    return m ? m[1] : '';
+  }
+  function refreshProjectLinks() {
+    var ref = projectRef($('syncUrl').value);
+    var box = $('projectLinks');
+    if (!box) return;
+    if (!ref) {
+      box.innerHTML = '<span class="smallmuted">Paste your Project URL above and direct links to the right Supabase pages will appear here.</span>';
+      return;
+    }
+    var base = 'https://supabase.com/dashboard/project/' + ref;
+    box.innerHTML = [
+      ['SQL Editor', base + '/sql/new'],
+      ['API keys', base + '/settings/api'],
+      ['Email templates', base + '/auth/templates']
+    ].map(function (l) {
+      return '<a class="btn secondary" style="text-decoration:none;text-align:center;padding:10px 12px;" target="_blank" rel="noopener" href="' + l[1] + '">' + l[0] + '</a>';
+    }).join('');
+  }
+  $('syncUrl').addEventListener('input', refreshProjectLinks);
+
   function saveProjectFields() {
     var url = normalizeUrl($('syncUrl').value);
     var key = $('syncKey').value.trim();
@@ -1059,10 +1117,10 @@
 
   $('authVerifyBtn').addEventListener('click', function () {
     var email = emailValue();
-    var code = ($('authCode').value || '').replace(/\D/g, '');
-    if (code.length < 6) { alert('Enter the 6-digit code from the email.'); return; }
+    var parsed = parseSignInInput($('authCode').value);
+    if (!parsed) { alert('Paste either the 6-digit code or the whole sign-in link from the email.'); return; }
     $('authVerifyBtn').disabled = true;
-    authVerifyCode(email, code)
+    authVerifyCode(email, parsed)
       .then(function () {
         $('authCodeBlock').style.display = 'none';
         $('authCode').value = '';
