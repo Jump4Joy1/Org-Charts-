@@ -1062,6 +1062,27 @@ input[type=file]{display:none;}
       <button data-v="portrait">Portrait</button>
     </div>
     <p class="smallmuted">Choosing Letter or A4 lays the chart out on a real page with margins, so the PDF looks like a document rather than a tight crop.</p>
+    <h4>Data formats</h4>
+    <div class="btnrow">
+      <button class="btn secondary" id="exportCsvBtn">CSV</button>
+      <button class="btn secondary" id="exportXlsxBtn">Excel</button>
+    </div>
+    <div class="btnrow">
+      <button class="btn secondary" id="exportMermaidBtn">Mermaid</button>
+      <button class="btn secondary" id="exportDrawioBtn">Draw.io</button>
+    </div>
+    <div class="btnrow">
+      <button class="btn secondary" id="exportIcsBtn">Shifts (.ics)</button>
+      <button class="btn secondary" id="exportVcardBtn">Contacts (.vcf)</button>
+    </div>
+    <p class="smallmuted">CSV and Excel carry every field, so a chart can be edited in a spreadsheet and imported back. Mermaid and Draw.io open in those tools as editable diagrams.</p>
+
+    <h4>Share a link</h4>
+    <div class="btnrow">
+      <button class="btn secondary" id="shareLinkBtn" style="flex:1;">Copy a link to this chart</button>
+    </div>
+    <p class="smallmuted">The whole chart is packed into the link, so it works without an account. Photos make links very long, so they are left out of the link.</p>
+
     <h4>Backup</h4>
     <div class="btnrow">
       <button class="btn secondary" id="exportBtn">Export JSON</button>

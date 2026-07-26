@@ -3861,6 +3861,382 @@
     } else downloadBlob(blob, filename);
   }
 
+
+  // ---------------------------------------------------------------------
+  // Data exports
+  //
+  // Everything here builds plain text or a small binary in the browser. No
+  // libraries: SheetJS would be a CDN dependency, and a minimal xlsx is a
+  // zip of five XML parts, which is less code than loading it.
+  // ---------------------------------------------------------------------
+
+  var CSV_COLUMNS = [
+    'id', 'name', 'title', 'detail', 'nickname', 'reports_to', 'status',
+    'phone', 'email', 'shift_days', 'shift_start', 'shift_end', 'on_call',
+    'certs', 'tasks', 'backup_of', 'shape', 'fill', 'x', 'y', 'width', 'height'
+  ];
+
+  function parentOf(chart, id) {
+    var found = '';
+    Object.keys(chart.edges).forEach(function (eid) {
+      var e = chart.edges[eid];
+      if (e.to === id && !found) found = e.from;
+    });
+    return found;
+  }
+
+  function nodeRow(chart, n) {
+    var shift = n.shift || {};
+    var contact = n.contact || {};
+    return {
+      id: n.id,
+      name: n.name || '',
+      title: n.title || '',
+      detail: n.detail || '',
+      nickname: n.nickname || '',
+      reports_to: parentOf(chart, n.id),
+      status: n.status || 'none',
+      phone: contact.phone || '',
+      email: contact.email || '',
+      shift_days: shift.days || '',
+      shift_start: shift.start || '',
+      shift_end: shift.end || '',
+      on_call: shift.onCall ? 'yes' : '',
+      certs: (n.certs || []).map(function (c) { return c.name + (c.expires ? '@' + c.expires : ''); }).join('; '),
+      tasks: (n.tasks || []).map(function (t) { return (t.done ? '[x] ' : '[ ] ') + t.text; }).join('; '),
+      backup_of: n.backupOf || '',
+      shape: n.shape || 'rounded',
+      fill: (n.fill && n.fill.color) || '',
+      x: Math.round(n.x), y: Math.round(n.y),
+      width: n.width || '', height: n.height || 0
+    };
+  }
+
+  function csvCell(v) {
+    v = v === undefined || v === null ? '' : String(v);
+    return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+  }
+  function buildCsv() {
+    var chart = getActiveChart();
+    var rows = Object.keys(chart.nodes).map(function (id) { return nodeRow(chart, chart.nodes[id]); });
+    var lines = [CSV_COLUMNS.join(',')];
+    rows.forEach(function (r) {
+      lines.push(CSV_COLUMNS.map(function (c) { return csvCell(r[c]); }).join(','));
+    });
+    // Excel and Numbers both need the BOM to read UTF-8 without mangling it.
+    return '﻿' + lines.join('\r\n') + '\r\n';
+  }
+
+  // ---- minimal xlsx ---------------------------------------------------
+  // A .xlsx is a zip of XML parts. Stored (uncompressed) entries keep the
+  // writer to a CRC and a header, which is far less code than a deflate.
+  function crc32(bytes) {
+    var c, table = crc32.table;
+    if (!table) {
+      table = crc32.table = [];
+      for (var n = 0; n < 256; n++) {
+        c = n;
+        for (var k = 0; k < 8; k++) c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+        table[n] = c >>> 0;
+      }
+    }
+    var crc = 0xffffffff;
+    for (var i = 0; i < bytes.length; i++) crc = (crc >>> 8) ^ table[(crc ^ bytes[i]) & 0xff];
+    return (crc ^ 0xffffffff) >>> 0;
+  }
+  function utf8(str) {
+    var out = [], enc = encodeURIComponent(str);
+    for (var i = 0; i < enc.length; i++) {
+      if (enc[i] === '%') { out.push(parseInt(enc.substr(i + 1, 2), 16)); i += 2; }
+      else out.push(enc.charCodeAt(i));
+    }
+    return new Uint8Array(out);
+  }
+  function zipStore(files) {
+    var chunks = [], central = [], offset = 0;
+    function u16(v) { return [v & 0xff, (v >>> 8) & 0xff]; }
+    function u32(v) { return [v & 0xff, (v >>> 8) & 0xff, (v >>> 16) & 0xff, (v >>> 24) & 0xff]; }
+    files.forEach(function (f) {
+      var name = utf8(f.name), data = utf8(f.data), crc = crc32(data);
+      var local = [].concat([0x50, 0x4b, 0x03, 0x04], u16(20), u16(0), u16(0), u16(0), u16(0),
+        u32(crc), u32(data.length), u32(data.length), u16(name.length), u16(0));
+      chunks.push(new Uint8Array(local), name, data);
+      central.push({ name: name, crc: crc, size: data.length, offset: offset });
+      offset += local.length + name.length + data.length;
+    });
+    var dirStart = offset, dirBytes = [];
+    central.forEach(function (c) {
+      var head = [].concat([0x50, 0x4b, 0x01, 0x02], u16(20), u16(20), u16(0), u16(0), u16(0), u16(0),
+        u32(c.crc), u32(c.size), u32(c.size), u16(c.name.length), u16(0), u16(0), u16(0), u16(0),
+        u32(0), u32(c.offset));
+      dirBytes = dirBytes.concat(head, Array.prototype.slice.call(c.name));
+    });
+    var end = [].concat([0x50, 0x4b, 0x05, 0x06], u16(0), u16(0), u16(central.length), u16(central.length),
+      u32(dirBytes.length), u32(dirStart), u16(0));
+    chunks.push(new Uint8Array(dirBytes), new Uint8Array(end));
+    return new Blob(chunks, { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  }
+  function xmlEsc(s) {
+    return String(s === undefined || s === null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&apos;')
+      // Excel rejects control characters outright.
+      .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, '');
+  }
+  function colName(i) {
+    var s = '';
+    i += 1;
+    while (i > 0) { var r = (i - 1) % 26; s = String.fromCharCode(65 + r) + s; i = Math.floor((i - 1) / 26); }
+    return s;
+  }
+  function buildXlsx() {
+    var chart = getActiveChart();
+    var rows = [CSV_COLUMNS].concat(Object.keys(chart.nodes).map(function (id) {
+      var r = nodeRow(chart, chart.nodes[id]);
+      return CSV_COLUMNS.map(function (c) { return r[c]; });
+    }));
+    var sheet = rows.map(function (row, ri) {
+      var cells = row.map(function (v, ci) {
+        var ref = colName(ci) + (ri + 1);
+        if (ri > 0 && typeof v === 'number') return '<c r="' + ref + '"><v>' + v + '</v></c>';
+        return '<c r="' + ref + '" t="inlineStr"><is><t xml:space="preserve">' + xmlEsc(v) + '</t></is></c>';
+      }).join('');
+      return '<row r="' + (ri + 1) + '">' + cells + '</row>';
+    }).join('');
+
+    return zipStore([
+      { name: '[Content_Types].xml', data: '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>' },
+      { name: '_rels/.rels', data: '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>' },
+      { name: 'xl/workbook.xml', data: '<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Org chart" sheetId="1" r:id="rId1"/></sheets></workbook>' },
+      { name: 'xl/_rels/workbook.xml.rels', data: '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>' },
+      { name: 'xl/worksheets/sheet1.xml', data: '<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>' + sheet + '</sheetData></worksheet>' }
+    ]);
+  }
+
+  // ---- mermaid --------------------------------------------------------
+  function mermaidId(id) { return 'n' + String(id).replace(/[^a-z0-9]/gi, ''); }
+  function buildMermaid() {
+    var chart = getActiveChart();
+    var lines = ['flowchart TD'];
+    Object.keys(chart.nodes).forEach(function (id) {
+      var n = chart.nodes[id];
+      var label = [n.name || 'Unnamed', n.title].filter(Boolean).join('<br/>').replace(/"/g, "'");
+      var open = '[', close = ']';
+      if (n.shape === 'circle') { open = '(('; close = '))'; }
+      else if (n.shape === 'diamond') { open = '{'; close = '}'; }
+      else if (n.shape === 'pill') { open = '(['; close = '])'; }
+      else if (n.shape === 'hexagon') { open = '{{'; close = '}}'; }
+      else if (n.shape === 'parallelogram') { open = '[/'; close = '/]'; }
+      else if (n.shape === 'cylinder') { open = '[('; close = ')]'; }
+      lines.push('  ' + mermaidId(id) + open + '"' + label + '"' + close);
+    });
+    Object.keys(chart.edges).forEach(function (eid) {
+      var e = chart.edges[eid];
+      if (!chart.nodes[e.from] || !chart.nodes[e.to]) return;
+      var arrow = e.dash === 'dashed' ? '-.->' : '-->';
+      var lbl = e.label ? '|' + e.label.replace(/\|/g, ' ') + '|' : '';
+      lines.push('  ' + mermaidId(e.from) + ' ' + arrow + lbl + ' ' + mermaidId(e.to));
+    });
+    return lines.join('\n') + '\n';
+  }
+
+  // ---- draw.io --------------------------------------------------------
+  function buildDrawio() {
+    var chart = getActiveChart();
+    var cells = ['<mxCell id="0"/>', '<mxCell id="1" parent="0"/>'];
+    Object.keys(chart.nodes).forEach(function (id) {
+      var n = chart.nodes[id];
+      var h = (nodeEls[id] && nodeEls[id].offsetHeight) || NODE_H_APPROX;
+      var shapeStyle = 'rounded=1';
+      if (n.shape === 'rect' || n.shape === 'square') shapeStyle = 'rounded=0';
+      else if (n.shape === 'circle') shapeStyle = 'ellipse';
+      else if (n.shape === 'diamond') shapeStyle = 'rhombus';
+      else if (n.shape === 'hexagon') shapeStyle = 'shape=hexagon';
+      else if (n.shape === 'parallelogram') shapeStyle = 'shape=parallelogram';
+      else if (n.shape === 'trapezoid') shapeStyle = 'shape=trapezoid';
+      else if (n.shape === 'cylinder') shapeStyle = 'shape=cylinder';
+      var fill = effectiveFillColor(n) || '#ffffff';
+      var label = [n.name || 'Unnamed', n.title].filter(Boolean).join('&#10;');
+      cells.push('<mxCell id="' + xmlEsc(id) + '" value="' + xmlEsc(label) + '" style="' + shapeStyle
+        + ';whiteSpace=wrap;html=1;fillColor=' + fill + ';" vertex="1" parent="1">'
+        + '<mxGeometry x="' + Math.round(n.x) + '" y="' + Math.round(n.y) + '" width="' + nodeW(n) + '" height="' + Math.round(h) + '" as="geometry"/></mxCell>');
+    });
+    Object.keys(chart.edges).forEach(function (eid) {
+      var e = chart.edges[eid];
+      if (!chart.nodes[e.from] || !chart.nodes[e.to]) return;
+      cells.push('<mxCell id="' + xmlEsc(eid) + '" value="' + xmlEsc(e.label || '') + '" style="edgeStyle=orthogonalEdgeStyle;html=1;" edge="1" parent="1" source="'
+        + xmlEsc(e.from) + '" target="' + xmlEsc(e.to) + '"><mxGeometry relative="1" as="geometry"/></mxCell>');
+    });
+    return '<mxfile host="orgchart"><diagram name="' + xmlEsc(chart.name || 'Org chart') + '">'
+      + '<mxGraphModel dx="1000" dy="800" grid="1" gridSize="10" page="1" pageWidth="1100" pageHeight="850">'
+      + '<root>' + cells.join('') + '</root></mxGraphModel></diagram></mxfile>';
+  }
+
+  // ---- calendar + contacts -------------------------------------------
+  function icsEscape(s) { return String(s || '').replace(/([,;\\])/g, '\\$1').replace(/\n/g, '\\n'); }
+  function icsStamp(d) { return d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, ''); }
+  var ICS_DAYS = { su: 'SU', mo: 'MO', tu: 'TU', we: 'WE', th: 'TH', fr: 'FR', sa: 'SA' };
+  function parseDays(str) {
+    var out = [];
+    String(str || '').toLowerCase().split(/[^a-z]+/).forEach(function (tok) {
+      var k = tok.slice(0, 2);
+      if (ICS_DAYS[k] && out.indexOf(ICS_DAYS[k]) === -1) out.push(ICS_DAYS[k]);
+    });
+    return out;
+  }
+  function buildIcs() {
+    var chart = getActiveChart();
+    var lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//OrgChart//EN', 'CALSCALE:GREGORIAN'];
+    var count = 0;
+    var today = new Date();
+    Object.keys(chart.nodes).forEach(function (id) {
+      var n = chart.nodes[id];
+      var sh = n.shift || {};
+      if (!sh.start || !sh.end) return;
+      var days = parseDays(sh.days);
+      var start = new Date(today); start.setHours(parseInt(sh.start.split(':')[0], 10) || 9, parseInt(sh.start.split(':')[1], 10) || 0, 0, 0);
+      var end = new Date(today); end.setHours(parseInt(sh.end.split(':')[0], 10) || 17, parseInt(sh.end.split(':')[1], 10) || 0, 0, 0);
+      if (end <= start) end.setDate(end.getDate() + 1);
+      lines.push('BEGIN:VEVENT');
+      lines.push('UID:' + id + '@orgchart');
+      lines.push('DTSTAMP:' + icsStamp(new Date()));
+      lines.push('DTSTART:' + icsStamp(start));
+      lines.push('DTEND:' + icsStamp(end));
+      lines.push('SUMMARY:' + icsEscape((n.name || 'Shift') + (sh.onCall ? ' (on call)' : '')));
+      if (n.title) lines.push('DESCRIPTION:' + icsEscape(n.title));
+      if (days.length) lines.push('RRULE:FREQ=WEEKLY;BYDAY=' + days.join(','));
+      lines.push('END:VEVENT');
+      count++;
+    });
+    lines.push('END:VCALENDAR');
+    return { text: lines.join('\r\n') + '\r\n', count: count };
+  }
+
+  function buildVcards() {
+    var chart = getActiveChart();
+    var out = [], count = 0;
+    Object.keys(chart.nodes).forEach(function (id) {
+      var n = chart.nodes[id];
+      var c = n.contact || {};
+      if (!c.phone && !c.email) return;
+      var name = (n.name || 'Unnamed').trim();
+      var parts = name.split(/\s+/);
+      var last = parts.length > 1 ? parts.pop() : '';
+      out.push('BEGIN:VCARD', 'VERSION:3.0',
+        'N:' + icsEscape(last) + ';' + icsEscape(parts.join(' ')) + ';;;',
+        'FN:' + icsEscape(name));
+      if (n.title) out.push('TITLE:' + icsEscape(n.title));
+      if (c.phone) out.push('TEL;TYPE=CELL:' + icsEscape(c.phone));
+      if (c.email) out.push('EMAIL;TYPE=INTERNET:' + icsEscape(c.email));
+      out.push('END:VCARD');
+      count++;
+    });
+    return { text: out.join('\r\n') + '\r\n', count: count };
+  }
+
+  // ---- share link -----------------------------------------------------
+  // The chart is packed into the fragment, which never leaves the device on
+  // the way to the server. Photos are stripped: a single one can be
+  // hundreds of kilobytes and would blow past what a URL can carry.
+  function chartForLink() {
+    var chart = JSON.parse(JSON.stringify(getActiveChart()));
+    var stripped = 0;
+    Object.keys(chart.nodes).forEach(function (id) {
+      if (chart.nodes[id].photo) { chart.nodes[id].photo = null; stripped++; }
+    });
+    delete chart.updatedAt;
+    return { chart: chart, stripped: stripped };
+  }
+  function encodeChartLink(chart) {
+    var json = JSON.stringify(chart);
+    // btoa is byte-oriented, so widen to UTF-8 first, then make it URL safe.
+    var b64 = btoa(String.fromCharCode.apply(null, utf8(json)));
+    return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+  function decodeChartLink(frag) {
+    var b64 = frag.replace(/-/g, '+').replace(/_/g, '/');
+    while (b64.length % 4) b64 += '=';
+    var bin = atob(b64);
+    var bytes = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return JSON.parse(decodeURIComponent(Array.prototype.map.call(bytes, function (b) {
+      return '%' + ('0' + b.toString(16)).slice(-2);
+    }).join('')));
+  }
+
+  // ---- export button wiring -------------------------------------------
+  function saveText(text, ext, mime) {
+    shareOrDownload(new Blob([text], { type: mime }), baseFilename() + '.' + ext, mime);
+  }
+  $('exportCsvBtn').addEventListener('click', function () {
+    saveText(buildCsv(), 'csv', 'text/csv');
+    toast('CSV exported');
+  });
+  $('exportXlsxBtn').addEventListener('click', function () {
+    shareOrDownload(buildXlsx(), baseFilename() + '.xlsx',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    toast('Excel file exported');
+  });
+  $('exportMermaidBtn').addEventListener('click', function () {
+    saveText(buildMermaid(), 'mmd', 'text/plain');
+    toast('Mermaid diagram exported');
+  });
+  $('exportDrawioBtn').addEventListener('click', function () {
+    saveText(buildDrawio(), 'drawio', 'application/xml');
+    toast('Draw.io file exported');
+  });
+  $('exportIcsBtn').addEventListener('click', function () {
+    var r = buildIcs();
+    if (!r.count) { alert('No shifts to export yet.\n\nOpen a box, go to Ops, and set a shift start and end time.'); return; }
+    saveText(r.text, 'ics', 'text/calendar');
+    toast(r.count + ' shift' + (r.count === 1 ? '' : 's') + ' exported');
+  });
+  $('exportVcardBtn').addEventListener('click', function () {
+    var r = buildVcards();
+    if (!r.count) { alert('No contacts to export yet.\n\nOpen a box, go to Ops, and add a phone number or email.'); return; }
+    saveText(r.text, 'vcf', 'text/vcard');
+    toast(r.count + ' contact' + (r.count === 1 ? '' : 's') + ' exported');
+  });
+  $('shareLinkBtn').addEventListener('click', function () {
+    var packed = chartForLink();
+    var link = location.origin + location.pathname + '#chart=' + encodeChartLink(packed.chart);
+    if (link.length > 30000) {
+      alert('This chart is too big to fit in a link.\n\nUse Export JSON instead, or sign in so it syncs.');
+      return;
+    }
+    var note = packed.stripped ? '\n\n' + packed.stripped + ' photo' + (packed.stripped === 1 ? '' : 's') + ' left out to keep the link short.' : '';
+    if (navigator.share) {
+      navigator.share({ title: getActiveChart().name, url: link }).catch(function () {});
+    } else if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(link).then(function () { alert('Link copied.' + note); })
+        .catch(function () { window.prompt('Copy this link:', link); });
+    } else {
+      window.prompt('Copy this link:', link);
+    }
+  });
+
+  // A chart arriving in the address bar is offered, never merged silently.
+  function consumeSharedLink() {
+    var m = /[#&]chart=([^&]+)/.exec(location.hash || '');
+    if (!m) return;
+    var incoming = null;
+    try { incoming = decodeChartLink(m[1]); } catch (e) {}
+    history.replaceState(null, '', location.pathname + location.search);
+    if (!incoming || !incoming.nodes) { toast('That link could not be read'); return; }
+    var count = Object.keys(incoming.nodes).length;
+    if (!window.confirm('Someone shared "' + (incoming.name || 'a chart') + '" with ' + count + ' box' + (count === 1 ? '' : 'es') + '.\n\nSave it to your charts?')) return;
+    var id = uid();
+    incoming.id = id;
+    incoming.updatedAt = Date.now();
+    migrateChart(incoming);
+    state.charts[id] = incoming;
+    state.activeId = id;
+    saveState();
+    render();
+    fitToScreen();
+    toast('Saved to your charts');
+  }
+
   $('exportBtn').addEventListener('click', function () {
     var chart = getActiveChart();
     var blob = new Blob([JSON.stringify(chart, null, 2)], { type: 'application/json' });
@@ -4415,6 +4791,7 @@
   // ---------------------------------------------------------------------
   ensureBootstrapChart();
   applyTokens();
+  consumeSharedLink();
   // Quiet: merely launching the app must not make this device's charts look
   // newer than an edit waiting on the server.
   saveState(true);
