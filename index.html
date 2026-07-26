@@ -459,6 +459,49 @@ svg#guides{position:absolute; left:0; top:0; overflow:visible; pointer-events:no
 .bggrid{display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-top:4px;}
 .bgswatch{height:46px; border-radius:9px; border:2px solid var(--line); padding:0; background-size:cover;}
 .bgswatch.sel{border-color:var(--accent); box-shadow:0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent);}
+/* Ops layer */
+.protag{
+  display:inline-block; font-size:9.5px; font-weight:800; letter-spacing:.06em;
+  background:var(--accent); color:#fff; padding:2px 6px; border-radius:6px; vertical-align:middle; margin-left:6px;
+}
+.protag.owned{background:var(--good, #2f9e6e);}
+.oprow{display:flex; align-items:center; gap:8px; padding:7px 0; border-bottom:1px solid var(--line);}
+.oprow input{flex:1; min-width:0; padding:8px 10px; border-radius:8px; border:1px solid var(--line); background:var(--panel); color:var(--text); font-size:13.5px;}
+.oprow input[type=date]{flex:0 0 132px;}
+.oprow .del{flex:0 0 auto; width:28px; height:28px; border-radius:8px; border:none; background:var(--panel2); color:var(--danger); font-size:15px;}
+.oprow.expired input{border-color:var(--danger);}
+.oprow .tick{flex:0 0 auto; width:26px; height:26px; border-radius:7px; border:1.5px solid var(--line); background:var(--panel); color:var(--good,#2f9e6e); font-size:14px; font-weight:700;}
+.oprow .tick.on{background:var(--good,#2f9e6e); color:#fff; border-color:transparent;}
+.oprow.done input{text-decoration:line-through; opacity:.6;}
+
+/* Status dot and cert warning ride on the card, above the shape layer. */
+.node .statusdot{
+  position:absolute; left:-5px; top:-5px; width:13px; height:13px; border-radius:50%;
+  border:2px solid var(--panel); z-index:7; display:none;
+}
+.node .statusdot.available{background:var(--good,#2f9e6e); display:block;}
+.node .statusdot.busy{background:var(--warn,#c2762a); display:block;}
+.node .statusdot.off{background:var(--muted); display:block;}
+.node .statusdot.available.pulse{animation:statusPulse 2.2s ease-in-out infinite;}
+@keyframes statusPulse{0%,100%{box-shadow:0 0 0 0 rgba(47,158,110,.55);}50%{box-shadow:0 0 0 6px rgba(47,158,110,0);}}
+.node .certflag{
+  position:absolute; right:-6px; top:-8px; z-index:7; display:none;
+  background:var(--danger); color:#fff; font-size:9.5px; font-weight:800;
+  padding:2px 5px; border-radius:6px; white-space:nowrap;
+}
+.node .certflag.show{display:block;}
+.node.bus-risk .shapelayer path{stroke-dasharray:6 4;}
+.node.bus-risk .certflag{background:var(--warn,#c2762a);}
+
+/* Quick actions from a long press */
+.quickgrid{display:grid; grid-template-columns:repeat(2,1fr); gap:10px; margin-top:4px;}
+.cmdrow{
+  display:block; width:100%; text-align:left; border:none; background:none; color:var(--text);
+  padding:11px 10px; border-radius:9px; font-size:14.5px; font-weight:600; border-bottom:1px solid var(--line);
+}
+.cmdrow.sel{background:var(--panel2);}
+.quickgrid .btn{flex:none;}
+
 .gradgrid{display:flex; gap:8px; margin-top:4px; flex-wrap:wrap;}
 .gradswatch{width:52px; height:34px; border-radius:8px; border:2px solid var(--line); flex:0 0 auto; padding:0;}
 .gradswatch.sel{border-color:var(--text);}
@@ -616,6 +659,51 @@ input[type=file]{display:none;}
       <input id="fNickname" placeholder="Auto from name — e.g. JW" maxlength="12">
     </div>
     <div class="sizehint" style="margin-top:-6px;">“Nickname only” always shows this text, even when a photo is attached. Leave it blank to use initials from the name.</div>
+
+    <h4>Ops <span class="protag" id="opsProTag">Pro</span></h4>
+    <div id="opsBlock">
+      <div class="seg" id="segStatus">
+        <button data-v="none" class="sel">No status</button>
+        <button data-v="available">Available</button>
+        <button data-v="busy">Busy</button>
+        <button data-v="off">Off</button>
+      </div>
+      <div class="field" style="margin-top:10px;"><label>Phone</label><input id="fPhone" type="tel" inputmode="tel" placeholder="+1 555 0100"></div>
+      <div class="field"><label>Email</label><input id="fEmail" type="email" autocapitalize="off" placeholder="name@example.com"></div>
+
+      <p class="smallmuted" style="margin:10px 0 2px;">Shift</p>
+      <div class="field"><label>Days</label><input id="fShiftDays" placeholder="Mon, Wed, Fri"></div>
+      <div class="sizerow" style="gap:8px;">
+        <label>Hours</label>
+        <input id="fShiftStart" type="time" style="flex:1;min-width:0;">
+        <input id="fShiftEnd" type="time" style="flex:1;min-width:0;">
+      </div>
+      <button type="button" class="checkrow" id="fOnCall" style="margin-top:8px;">
+        <div class="cbox"></div>
+        <div class="ctext"><div class="ctitle">On call</div><div class="csub">Flagged on the card and in the shift export</div></div>
+      </button>
+
+      <p class="smallmuted" style="margin:12px 0 2px;">Certifications</p>
+      <div id="certList"></div>
+      <div class="btnrow" style="margin-top:6px;">
+        <button class="btn secondary" id="certAddBtn" style="flex:1;">+ Add certification</button>
+      </div>
+
+      <p class="smallmuted" style="margin:12px 0 2px;">Tasks</p>
+      <div id="taskList"></div>
+      <div class="btnrow" style="margin-top:6px;">
+        <button class="btn secondary" id="taskAddBtn" style="flex:1;">+ Add task</button>
+      </div>
+
+      <p class="smallmuted" style="margin:12px 0 2px;">Backs up</p>
+      <select id="fBackupOf"></select>
+    </div>
+    <div id="opsLocked" style="display:none;">
+      <p class="smallmuted" style="margin-top:0;">Status badges, contacts, shifts, certification tracking, tasks and the succession view are part of Pro.</p>
+      <div class="btnrow" style="margin-top:6px;">
+        <button class="btn" id="opsUnlockBtn" style="flex:1;">Unlock Pro</button>
+      </div>
+    </div>
 
     <h4>Card layout</h4>
     <div class="seg" id="segLayout">
@@ -918,6 +1006,10 @@ input[type=file]{display:none;}
       <button class="btn secondary" id="paletteOpenBtn" style="flex:1;">🎨 Colour sets</button>
     </div>
     <div class="btnrow">
+      <button class="btn secondary" id="busFactorBtn">🕳 Succession view</button>
+      <button class="btn secondary" id="proOpenBtn">⭐ Pro</button>
+    </div>
+    <div class="btnrow">
       <button class="btn secondary" id="syncOpenBtn" style="flex:1;"><span class="syncdot" id="menuSyncDot"></span> <span id="menuSyncLabel">Sync across devices</span></button>
     </div>
     <p class="smallmuted">Everything saves automatically as you work — there’s no save button. <b>Save a copy</b> snapshots a chart so you can rearrange the original and still have the old layout.</p>
@@ -1090,6 +1182,60 @@ input[type=file]{display:none;}
     </div>
     <p class="smallmuted">PDF opens the print sheet — choose "Save to Files" or "Save as PDF" to keep a crisp vector copy. SVG is a scalable vector file you can open or edit elsewhere.</p>
     <button class="btn ghost" id="exportCloseBtn" style="margin-top:6px;">Close</button>
+  </div>
+</div>
+
+<!-- Command palette -->
+<div class="sheet-backdrop" id="cmdBackdrop">
+  <div class="sheet" id="cmdSheet">
+    <div class="sheet-handle"></div>
+    <h3>Commands</h3>
+    <div class="field"><input id="cmdInput" placeholder="Type to filter…" autocapitalize="off" autocorrect="off" spellcheck="false"></div>
+    <div id="cmdList"></div>
+    <button class="btn ghost" id="cmdClose" style="margin-top:6px;">Close</button>
+  </div>
+</div>
+
+<!-- Long-press quick actions -->
+<div class="sheet-backdrop" id="quickBackdrop">
+  <div class="sheet" id="quickSheet">
+    <div class="sheet-handle"></div>
+    <h3 id="quickName">Quick actions</h3>
+    <div id="quickSub" class="smallmuted" style="margin-top:0;"></div>
+    <div class="quickgrid" id="quickActions"></div>
+    <div class="btnrow">
+      <button class="btn secondary" id="quickEdit" style="flex:1;">Open box</button>
+    </div>
+    <button class="btn ghost" id="quickClose" style="margin-top:4px;">Close</button>
+  </div>
+</div>
+
+<!-- Pro unlock -->
+<div class="sheet-backdrop" id="proBackdrop">
+  <div class="sheet" id="proSheet">
+    <div class="sheet-handle"></div>
+    <h3>OrgChart Pro</h3>
+    <p class="smallmuted" style="margin-top:0;">One payment, this device and any you sign in on. Everything you already have keeps working without it.</p>
+    <ul class="setupsteps">
+      <li>Status badges on every box, with a live pulse for who is available.</li>
+      <li>Phone, SMS and email straight from a long press on a box.</li>
+      <li>Certification tracking with expiry warnings on the card.</li>
+      <li>Shift scheduling, on-call flags and calendar export.</li>
+      <li>Task list per role.</li>
+      <li>Succession view: highlights every job with nobody backing it up.</li>
+    </ul>
+    <div class="btnrow">
+      <button class="btn" id="proBuyBtn" style="flex:1;">Unlock Pro</button>
+    </div>
+    <div class="field" style="margin-top:12px;"><label>Already have a licence key?</label><input id="proKeyInput" placeholder="Paste it here" autocapitalize="off" spellcheck="false"></div>
+    <div class="btnrow" style="margin-top:0;">
+      <button class="btn secondary" id="proApplyBtn" style="flex:1;">Apply key</button>
+    </div>
+    <div id="proOwned" style="display:none;">
+      <div class="codebox" id="proOwnedText"></div>
+      <div class="btnrow"><button class="btn secondary" id="proRemoveBtn" style="flex:1;">Remove licence from this device</button></div>
+    </div>
+    <button class="btn ghost" id="proClose" style="margin-top:6px;">Close</button>
   </div>
 </div>
 

@@ -1445,7 +1445,10 @@
     el.querySelector('.ntitle').style.color = tc.title;
     el.querySelector('.ndetail').style.color = tc.title;
     drawNodeShape(el, n);
+    applyOpsDecor(el, n, opsRiskSet);
   }
+  // Recomputed once per render rather than per card.
+  var opsRiskSet = {};
 
   // Paints the card's outline into its own SVG layer. The card itself is a
   // transparent box; everything visible — fill, gradient, texture, border —
@@ -1517,6 +1520,8 @@
   function render() {
     ensureBootstrapChart();
     applyChartVars();
+    opsRiskSet = {};
+    if (busFactorOn && isPro()) busRiskIds(getActiveChart()).forEach(function (id) { opsRiskSet[id] = true; });
     var chart = getActiveChart();
     chartNameInput.value = chart.name;
     var nodeIds = Object.keys(chart.nodes);
@@ -1538,7 +1543,8 @@
           '<div class="ntext"><div class="nname"></div><div class="ntitle"></div><div class="ndetail"></div></div>' +
           '<div class="handle n" data-dir="n"></div><div class="handle s" data-dir="s"></div>' +
           '<div class="handle e" data-dir="e"></div><div class="handle w" data-dir="w"></div>' +
-          '<div class="szgrip"></div>';
+          '<div class="szgrip"></div>' +
+          '<div class="statusdot"></div><div class="certflag"></div>';
         canvas.appendChild(el);
         nodeEls[id] = el;
         wireNodeEvents(el);
@@ -2019,10 +2025,23 @@
     var origX = n.x, origY = n.y;
     var moved = false, preSnap = null;
 
+    // Hold still for half a second and the quick actions come up instead of
+    // the editor. Any real movement cancels it, so dragging is unaffected.
+    var longPress = setTimeout(function () {
+      if (moved) return;
+      longPress = null;
+      if (!isPro()) return;
+      el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerup', up);
+      el.removeEventListener('pointercancel', up);
+      openQuickSheet(id);
+    }, 500);
+    function cancelLongPress() { if (longPress) { clearTimeout(longPress); longPress = null; } }
+
     function move(ev) {
       var dx = (ev.clientX - startX) / scale, dy = (ev.clientY - startY) / scale;
       if (!moved && (Math.abs(ev.clientX - startX) > 6 || Math.abs(ev.clientY - startY) > 6)) {
-        moved = true; preSnap = snapshot(); el.classList.add('dragging');
+        moved = true; cancelLongPress(); preSnap = snapshot(); el.classList.add('dragging');
       }
       if (!moved) return;
       var snapped = applySnap(id, origX + dx, origY + dy);
@@ -2031,6 +2050,7 @@
       drawGuides(snapped.guides);
     }
     function up() {
+      cancelLongPress();
       el.removeEventListener('pointermove', move);
       el.removeEventListener('pointerup', up);
       el.removeEventListener('pointercancel', up);
@@ -2636,6 +2656,7 @@
     updatePhotoHint();
     wireSeg($('segAlign'), n.align || 'center');
     setFontScaleControls(n);
+    fillOpsFields(n);
     setSizeControls(n);
     buildShapeGrid(n.shape || 'rounded');
     fCorner.value = String(Math.min(60, cornerRadius(n)));
@@ -2660,7 +2681,15 @@
     editSheet.classList.add('show');
     if (focusEmpty) setTimeout(function () { fName.focus(); }, 260);
   }
-  function closeEditSheet() { editBackdrop.classList.remove('show'); editSheet.classList.remove('show'); editingId = null; pendingPhoto = null; }
+  function closeEditSheet() {
+    editBackdrop.classList.remove('show');
+    editSheet.classList.remove('show');
+    // Otherwise the name field keeps focus behind the closed sheet and every
+    // later keystroke reads as typing.
+    if (document.activeElement && editSheet.contains(document.activeElement)) document.activeElement.blur();
+    editingId = null;
+    pendingPhoto = null;
+  }
 
   $('fSave').addEventListener('click', function () {
     if (!editingId) return;
@@ -2687,6 +2716,7 @@
     n.border = { color: borderColorPicker.dataset.value, width: parseFloat(segValue(segBorderWidth)), dash: segValue(segBorderDash) };
     n.font = fFont.value;
     n.textColor = textColorPicker.dataset.value;
+    readOpsFields(n);
     saveState();
     closeEditSheet();
     render();
@@ -3862,6 +3892,318 @@
   }
 
 
+  // =====================================================================
+  // Ops layer
+  //
+  // Status, contacts, shifts, certifications, tasks and succession. Gated
+  // behind a Pro licence, which is checked in one place: isPro(). The gate
+  // hides UI and skips ops rendering; it deliberately does not delete or
+  // refuse to sync ops data, so turning Pro off never destroys anything the
+  // user typed.
+  //
+  // The licence is a signed-ish key stored on the device. That is honest
+  // about what a static site can enforce: it stops casual sharing, not a
+  // determined person with dev tools. Real enforcement needs a server.
+  // =====================================================================
+  var PRO_KEY = 'orgchart.pro';
+  // Set this to your Stripe payment link to turn the button into a purchase.
+  var PRO_CHECKOUT_URL = '';
+
+  function licenceIsValid(key) {
+    key = String(key || '').trim().toUpperCase().replace(/\s+/g, '');
+    if (!/^OC-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(key)) return false;
+    // Checksum: the letters and digits of the three blocks must sum to a
+    // multiple of 7. Enough to reject typos and invented keys.
+    var body = key.slice(3).replace(/-/g, '');
+    var sum = 0;
+    for (var i = 0; i < body.length; i++) sum += body.charCodeAt(i);
+    return sum % 7 === 0;
+  }
+  function getLicence() {
+    try { return localStorage.getItem(PRO_KEY) || ''; } catch (e) { return ''; }
+  }
+  function isPro() { return licenceIsValid(getLicence()); }
+  function setLicence(key) {
+    try {
+      if (key) localStorage.setItem(PRO_KEY, key); else localStorage.removeItem(PRO_KEY);
+    } catch (e) {}
+  }
+
+  function opsOf(n) {
+    return {
+      status: n.status || 'none',
+      contact: n.contact || { phone: '', email: '' },
+      shift: n.shift || { onCall: false, days: '', start: '', end: '' },
+      certs: n.certs || [],
+      tasks: n.tasks || [],
+      backupOf: n.backupOf || ''
+    };
+  }
+
+  /** Days until a cert lapses. Negative means it already has. */
+  function daysUntil(dateStr) {
+    if (!dateStr) return null;
+    var then = new Date(dateStr + 'T00:00:00');
+    if (isNaN(then.getTime())) return null;
+    var now = new Date();
+    now.setHours(0, 0, 0, 0);
+    return Math.round((then - now) / 86400000);
+  }
+  /** The soonest problem across a node's certs, or null when all are fine. */
+  function certWarning(n) {
+    var worst = null;
+    (n.certs || []).forEach(function (c) {
+      var d = daysUntil(c.expires);
+      if (d === null) return;
+      if (d <= 30 && (worst === null || d < worst.days)) worst = { days: d, name: c.name };
+    });
+    if (!worst) return null;
+    return { days: worst.days, name: worst.name, expired: worst.days < 0 };
+  }
+
+  /** Roles nobody is listed as backing up. The succession view's whole point. */
+  function busRiskIds(chart) {
+    var backed = {};
+    Object.keys(chart.nodes).forEach(function (id) {
+      var b = chart.nodes[id].backupOf;
+      if (b) backed[b] = true;
+    });
+    return Object.keys(chart.nodes).filter(function (id) {
+      // Only roles with someone reporting to them are worth flagging; a leaf
+      // with no backup is usually just a person, not a single point of failure.
+      var hasReports = Object.keys(chart.edges).some(function (eid) { return chart.edges[eid].from === id; });
+      return hasReports && !backed[id];
+    });
+  }
+
+  var busFactorOn = false;
+
+  /** Paints status, cert flags and bus-risk onto a card. */
+  function applyOpsDecor(el, n, riskSet) {
+    var dot = el.querySelector('.statusdot');
+    var flag = el.querySelector('.certflag');
+    if (!dot || !flag) return;
+    var pro = isPro();
+    var o = opsOf(n);
+    dot.className = 'statusdot' + (pro && o.status !== 'none' ? ' ' + o.status : '') + (o.status === 'available' ? ' pulse' : '');
+    var warn = pro ? certWarning(n) : null;
+    if (warn) {
+      flag.textContent = warn.expired ? 'CERT EXPIRED' : 'CERT ' + warn.days + 'd';
+      flag.classList.add('show');
+      flag.title = warn.name;
+    } else {
+      flag.classList.remove('show');
+      flag.textContent = '';
+    }
+    var risky = pro && busFactorOn && riskSet && riskSet[n.id];
+    el.classList.toggle('bus-risk', !!risky);
+    if (risky && !warn) {
+      flag.textContent = 'NO BACKUP';
+      flag.classList.add('show');
+    }
+  }
+
+  // ---- edit sheet: ops fields -----------------------------------------
+  var certDraft = [], taskDraft = [];
+
+  function renderCertRows() {
+    var box = $('certList');
+    box.innerHTML = '';
+    certDraft.forEach(function (c, i) {
+      var row = document.createElement('div');
+      var d = daysUntil(c.expires);
+      row.className = 'oprow' + (d !== null && d < 0 ? ' expired' : '');
+      row.innerHTML = '<input class="cname" placeholder="Certification" value="' + escapeHtml(c.name || '') + '">'
+        + '<input class="cexp" type="date" value="' + escapeHtml(c.expires || '') + '">'
+        + '<button class="del" aria-label="Remove">×</button>';
+      row.querySelector('.cname').addEventListener('input', function () { certDraft[i].name = this.value; });
+      row.querySelector('.cexp').addEventListener('change', function () { certDraft[i].expires = this.value; renderCertRows(); });
+      row.querySelector('.del').addEventListener('click', function () { certDraft.splice(i, 1); renderCertRows(); });
+      box.appendChild(row);
+    });
+    if (!certDraft.length) box.innerHTML = '<span class="smallmuted">None yet.</span>';
+  }
+  function renderTaskRows() {
+    var box = $('taskList');
+    box.innerHTML = '';
+    taskDraft.forEach(function (t, i) {
+      var row = document.createElement('div');
+      row.className = 'oprow' + (t.done ? ' done' : '');
+      row.innerHTML = '<button class="tick' + (t.done ? ' on' : '') + '" aria-label="Done">✓</button>'
+        + '<input class="ttext" placeholder="Task" value="' + escapeHtml(t.text || '') + '">'
+        + '<button class="del" aria-label="Remove">×</button>';
+      row.querySelector('.tick').addEventListener('click', function () { taskDraft[i].done = !taskDraft[i].done; renderTaskRows(); });
+      row.querySelector('.ttext').addEventListener('input', function () { taskDraft[i].text = this.value; });
+      row.querySelector('.del').addEventListener('click', function () { taskDraft.splice(i, 1); renderTaskRows(); });
+      box.appendChild(row);
+    });
+    if (!taskDraft.length) box.innerHTML = '<span class="smallmuted">None yet.</span>';
+  }
+  $('certAddBtn').addEventListener('click', function () { certDraft.push({ name: '', expires: '' }); renderCertRows(); });
+  $('taskAddBtn').addEventListener('click', function () { taskDraft.push({ text: '', done: false }); renderTaskRows(); });
+
+  var onCallDraft = false;
+  $('fOnCall').addEventListener('click', function () {
+    onCallDraft = !onCallDraft;
+    this.classList.toggle('on', onCallDraft);
+    this.querySelector('.cbox').textContent = onCallDraft ? '✓' : '';
+  });
+
+  function fillOpsFields(n) {
+    var o = opsOf(n);
+    var pro = isPro();
+    $('opsBlock').style.display = pro ? 'block' : 'none';
+    $('opsLocked').style.display = pro ? 'none' : 'block';
+    $('opsProTag').textContent = pro ? 'Pro' : 'Pro';
+    $('opsProTag').classList.toggle('owned', pro);
+    if (!pro) return;
+
+    wireSeg($('segStatus'), o.status);
+    $('fPhone').value = o.contact.phone || '';
+    $('fEmail').value = o.contact.email || '';
+    $('fShiftDays').value = o.shift.days || '';
+    $('fShiftStart').value = o.shift.start || '';
+    $('fShiftEnd').value = o.shift.end || '';
+    onCallDraft = !!o.shift.onCall;
+    $('fOnCall').classList.toggle('on', onCallDraft);
+    $('fOnCall').querySelector('.cbox').textContent = onCallDraft ? '✓' : '';
+    certDraft = JSON.parse(JSON.stringify(o.certs));
+    taskDraft = JSON.parse(JSON.stringify(o.tasks));
+    renderCertRows();
+    renderTaskRows();
+
+    var sel = $('fBackupOf');
+    var chart = getActiveChart();
+    sel.innerHTML = '<option value="">Nobody</option>';
+    Object.keys(chart.nodes).forEach(function (id) {
+      if (id === n.id) return;
+      var opt = document.createElement('option');
+      opt.value = id;
+      opt.textContent = chart.nodes[id].name || 'Unnamed';
+      sel.appendChild(opt);
+    });
+    sel.value = o.backupOf || '';
+  }
+
+  function readOpsFields(n) {
+    if (!isPro()) return;
+    n.status = segValue($('segStatus'));
+    n.contact = { phone: $('fPhone').value.trim(), email: $('fEmail').value.trim() };
+    n.shift = {
+      onCall: onCallDraft,
+      days: $('fShiftDays').value.trim(),
+      start: $('fShiftStart').value,
+      end: $('fShiftEnd').value
+    };
+    n.certs = certDraft.filter(function (c) { return (c.name || '').trim(); });
+    n.tasks = taskDraft.filter(function (t) { return (t.text || '').trim(); });
+    n.backupOf = $('fBackupOf').value || '';
+  }
+
+  // ---- long-press quick actions ---------------------------------------
+  var quickBackdrop = $('quickBackdrop'), quickSheet = $('quickSheet');
+  var quickId = null;
+  function openQuickSheet(id) {
+    var n = getActiveChart().nodes[id];
+    if (!n) return;
+    quickId = id;
+    var o = opsOf(n);
+    $('quickName').textContent = n.name || 'Unnamed';
+    $('quickSub').textContent = [n.title, o.shift.onCall ? 'On call' : ''].filter(Boolean).join(' · ');
+    var box = $('quickActions');
+    box.innerHTML = '';
+    // Native handlers only. A web page cannot place a call itself, and a
+    // Twilio key in the page would be readable by anyone who loads it.
+    var acts = [];
+    if (o.contact.phone) {
+      var tel = o.contact.phone.replace(/[^\d+]/g, '');
+      acts.push({ label: '📞 Call', href: 'tel:' + tel });
+      acts.push({ label: '💬 Text', href: 'sms:' + tel });
+      acts.push({ label: '🟢 WhatsApp', href: 'https://wa.me/' + tel.replace(/\D/g, '') });
+    }
+    if (o.contact.email) acts.push({ label: '✉️ Email', href: 'mailto:' + o.contact.email });
+    if (!acts.length) {
+      box.innerHTML = '<span class="smallmuted">No phone or email on this box yet. Open it and add one under Ops.</span>';
+    }
+    acts.forEach(function (a) {
+      var b = document.createElement('a');
+      b.className = 'btn secondary';
+      b.style.textAlign = 'center';
+      b.style.textDecoration = 'none';
+      b.style.padding = '12px 14px';
+      b.href = a.href;
+      b.rel = 'noopener';
+      b.textContent = a.label;
+      box.appendChild(b);
+    });
+    quickBackdrop.classList.add('show');
+    quickSheet.classList.add('show');
+  }
+  function closeQuickSheet() { quickBackdrop.classList.remove('show'); quickSheet.classList.remove('show'); quickId = null; }
+  $('quickClose').addEventListener('click', closeQuickSheet);
+  $('quickEdit').addEventListener('click', function () { var id = quickId; closeQuickSheet(); if (id) openEditSheet(id); });
+  quickBackdrop.addEventListener('click', function (e) { if (e.target === quickBackdrop) closeQuickSheet(); });
+
+  // ---- succession view -------------------------------------------------
+  $('busFactorBtn').addEventListener('click', function () {
+    if (!requirePro('The succession view')) return;
+    busFactorOn = !busFactorOn;
+    closeMenu();
+    render();
+    var chart = getActiveChart();
+    var n = busRiskIds(chart).length;
+    toast(busFactorOn
+      ? (n ? n + ' role' + (n === 1 ? '' : 's') + ' with no backup' : 'Every role has a backup')
+      : 'Succession view off');
+  });
+
+  // ---- Pro sheet -------------------------------------------------------
+  var proBackdrop = $('proBackdrop'), proSheet = $('proSheet');
+  function openProSheet() {
+    var owned = isPro();
+    $('proOwned').style.display = owned ? 'block' : 'none';
+    $('proOwnedText').textContent = owned ? 'Licensed: ' + getLicence() : '';
+    $('proBuyBtn').textContent = owned ? 'Pro is unlocked' : 'Unlock Pro';
+    $('proBuyBtn').disabled = owned;
+    proBackdrop.classList.add('show');
+    proSheet.classList.add('show');
+  }
+  function closeProSheet() { proBackdrop.classList.remove('show'); proSheet.classList.remove('show'); }
+  $('proOpenBtn').addEventListener('click', function () { closeMenu(); setTimeout(openProSheet, 120); });
+  $('proClose').addEventListener('click', closeProSheet);
+  proBackdrop.addEventListener('click', function (e) { if (e.target === proBackdrop) closeProSheet(); });
+  $('proBuyBtn').addEventListener('click', function () {
+    if (!PRO_CHECKOUT_URL) {
+      alert('Checkout is not connected yet.\n\nAdd your Stripe payment link to PRO_CHECKOUT_URL in app.js, and it will open here. Until then you can paste a licence key below.');
+      return;
+    }
+    window.open(PRO_CHECKOUT_URL, '_blank', 'noopener');
+  });
+  $('proApplyBtn').addEventListener('click', function () {
+    var key = $('proKeyInput').value.trim().toUpperCase();
+    if (!licenceIsValid(key)) { alert('That key is not valid.\n\nKeys look like OC-XXXX-XXXX-XXXX.'); return; }
+    setLicence(key);
+    $('proKeyInput').value = '';
+    openProSheet();
+    render();
+    toast('Pro unlocked');
+  });
+  $('proRemoveBtn').addEventListener('click', function () {
+    if (!window.confirm('Remove the licence from this device?\n\nOps data you have entered stays on your charts.')) return;
+    setLicence('');
+    openProSheet();
+    render();
+    toast('Licence removed');
+  });
+  $('opsUnlockBtn').addEventListener('click', function () { closeEditSheet(); setTimeout(openProSheet, 150); });
+
+  /** Shared gate for Pro entry points. */
+  function requirePro(what) {
+    if (isPro()) return true;
+    if (window.confirm(what + ' is part of Pro.\n\nOpen the Pro page?')) setTimeout(openProSheet, 100);
+    return false;
+  }
+
   // ---------------------------------------------------------------------
   // Data exports
   //
@@ -4785,6 +5127,134 @@
     clearTimeout(toastTimer);
     toastTimer = setTimeout(function () { toastEl.classList.remove('show'); }, 1800);
   }
+
+  // ---------------------------------------------------------------------
+  // Keyboard shortcuts and the command palette
+  // ---------------------------------------------------------------------
+  function anySheetOpen() {
+    return !!document.querySelector('.sheet-backdrop.show');
+  }
+  function closeAllSheets() {
+    var any = false;
+    document.querySelectorAll('.sheet-backdrop.show').forEach(function (b) {
+      any = true;
+      b.classList.remove('show');
+      var sh = b.querySelector('.sheet');
+      if (sh) sh.classList.remove('show');
+    });
+    // A field inside a sheet that just closed keeps focus, which would make
+    // every later keystroke look like typing and swallow the shortcuts.
+    if (any && document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    return any;
+  }
+  function typingInField(t) {
+    if (!t) return false;
+    var isField = t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable;
+    if (!isField) return false;
+    // A dismissed sheet is translated off-screen, not hidden, so a field
+    // inside it still reports a layout box and keeps focus. Judge by whether
+    // its sheet is actually open.
+    var sheet = t.closest ? t.closest('.sheet') : null;
+    if (sheet && !sheet.classList.contains('show')) return false;
+    return true;
+  }
+
+  var PALETTE_ACTIONS = [
+    { label: 'Add a box', keys: 'new box create', run: function () { $('fab').click(); } },
+    { label: 'Add a note', keys: 'note sticky', run: function () { $('noteFab').click(); } },
+    { label: 'Add a department container', keys: 'group container department', run: function () { $('groupFab').click(); } },
+    { label: 'Search boxes', keys: 'find search', run: function () { $('searchFab').click(); } },
+    { label: 'Fit chart to screen', keys: 'zoom fit', run: function () { $('fitbtn').click(); } },
+    { label: 'Tidy layout', keys: 'arrange auto layout', run: function () { $('relayoutBtn2').click(); } },
+    { label: 'Chart style', keys: 'design background theme', run: function () { openDesign(); } },
+    { label: 'Export and share', keys: 'pdf png csv excel export', run: function () { openExport(); } },
+    { label: 'Colour sets', keys: 'palette colours brand', run: function () { openPaletteSheet(); } },
+    { label: 'Sync across devices', keys: 'sync sign in account', run: function () { openSyncSheet(); } },
+    { label: 'Your charts', keys: 'menu charts open switch', run: function () { openMenu(); } },
+    { label: 'Succession view', keys: 'bus factor backup risk', run: function () { $('busFactorBtn').click(); } },
+    { label: 'Undo', keys: 'undo back', run: function () { $('undoBtn').click(); } },
+    { label: 'Redo', keys: 'redo forward', run: function () { $('redoBtn').click(); } }
+  ];
+
+  var paletteBackdropEl = $('cmdBackdrop'), paletteSheetEl = $('cmdSheet');
+  var paletteIndex = 0, paletteMatches = [];
+
+  function scorePalette(a, q) {
+    if (!q) return 1;
+    var hay = (a.label + ' ' + a.keys).toLowerCase();
+    var qi = 0;
+    // Subsequence match, so "expsh" finds "Export and share".
+    for (var i = 0; i < hay.length && qi < q.length; i++) {
+      if (hay[i] === q[qi]) qi++;
+    }
+    if (qi < q.length) return 0;
+    return hay.indexOf(q) >= 0 ? 3 : 1;
+  }
+  function renderPalette() {
+    var q = $('cmdInput').value.trim().toLowerCase();
+    paletteMatches = PALETTE_ACTIONS
+      .map(function (a) { return { a: a, s: scorePalette(a, q) }; })
+      .filter(function (x) { return x.s > 0; })
+      .sort(function (x, y) { return y.s - x.s; })
+      .map(function (x) { return x.a; });
+    if (paletteIndex >= paletteMatches.length) paletteIndex = 0;
+    var box = $('cmdList');
+    box.innerHTML = '';
+    paletteMatches.forEach(function (a, i) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'cmdrow' + (i === paletteIndex ? ' sel' : '');
+      b.textContent = a.label;
+      b.addEventListener('click', function () { runPalette(a); });
+      box.appendChild(b);
+    });
+    if (!paletteMatches.length) box.innerHTML = '<span class="smallmuted">Nothing matches.</span>';
+  }
+  function openPalette() {
+    $('cmdInput').value = '';
+    paletteIndex = 0;
+    renderPalette();
+    paletteBackdropEl.classList.add('show');
+    paletteSheetEl.classList.add('show');
+    setTimeout(function () { $('cmdInput').focus(); }, 60);
+  }
+  function closePalette() {
+    paletteBackdropEl.classList.remove('show');
+    paletteSheetEl.classList.remove('show');
+    $('cmdInput').blur();
+  }
+  function runPalette(a) { closePalette(); setTimeout(function () { a.run(); }, 80); }
+  $('cmdInput').addEventListener('input', function () { paletteIndex = 0; renderPalette(); });
+  $('cmdInput').addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowDown') { paletteIndex = Math.min(paletteIndex + 1, paletteMatches.length - 1); renderPalette(); e.preventDefault(); }
+    else if (e.key === 'ArrowUp') { paletteIndex = Math.max(paletteIndex - 1, 0); renderPalette(); e.preventDefault(); }
+    else if (e.key === 'Enter') { if (paletteMatches[paletteIndex]) runPalette(paletteMatches[paletteIndex]); e.preventDefault(); }
+  });
+  $('cmdClose').addEventListener('click', closePalette);
+  paletteBackdropEl.addEventListener('click', function (e) { if (e.target === paletteBackdropEl) closePalette(); });
+
+  document.addEventListener('keydown', function (e) {
+    var mod = e.metaKey || e.ctrlKey;
+    if (mod && (e.key === 'k' || e.key === 'K')) { e.preventDefault(); openPalette(); return; }
+    if (typingInField(e.target)) return;
+    if (mod && (e.key === 'z' || e.key === 'Z')) {
+      e.preventDefault();
+      if (e.shiftKey) $('redoBtn').click(); else $('undoBtn').click();
+      return;
+    }
+    if (mod && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); $('redoBtn').click(); return; }
+    if (e.key === 'Escape') {
+      // Close everything that is open, not just the first backdrop in DOM
+      // order: sheets can open on top of one another and the markup order
+      // says nothing about which is in front.
+      closeAllSheets();
+      return;
+    }
+    if (anySheetOpen()) return;
+    if (e.key === 'n' || e.key === 'N') { e.preventDefault(); $('fab').click(); }
+    else if (e.key === 'f' || e.key === 'F') { e.preventDefault(); $('fitbtn').click(); }
+    else if (e.key === '/') { e.preventDefault(); $('searchFab').click(); }
+  });
 
   // ---------------------------------------------------------------------
   // Init
