@@ -50,6 +50,18 @@
   --shadow: 0 2px 14px rgba(0,0,0,.3);
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+/* Respect the OS setting rather than animating regardless. */
+@media (prefers-reduced-motion: reduce){
+  *, *::before, *::after{
+    animation-duration:.001ms !important; animation-iteration-count:1 !important;
+    transition-duration:.001ms !important; scroll-behavior:auto !important;
+  }
+}
+/* High contrast thickens the hairlines that a stronger palette alone
+   cannot rescue. */
+:root[data-contrast="high"] .node .shapelayer path{stroke-width:2;}
+:root[data-contrast="high"] .sheet, :root[data-contrast="high"] #topbar{border-color:var(--text);}
+:root[data-contrast="high"] .smallmuted, :root[data-contrast="high"] .sizehint{color:var(--text);}
 html,body{height:100%;overscroll-behavior:none;}
 body{
   margin:0; background:var(--bg); color:var(--text);
@@ -973,6 +985,20 @@ input[type=file]{display:none;}
     </div>
     <p class="smallmuted">Snapping lines boxes up with their neighbours as you drag, with a guide showing the match.</p>
 
+    <h4>Density</h4>
+    <div class="seg" id="segDensity">
+      <button data-v="compact">Compact</button>
+      <button data-v="standard" class="sel">Standard</button>
+      <button data-v="spacious">Spacious</button>
+    </div>
+    <p class="smallmuted">Tightens or loosens spacing across the whole app and the boxes on the canvas.</p>
+
+    <h4>Contrast</h4>
+    <div class="seg" id="segContrast">
+      <button data-v="normal" class="sel">Normal</button>
+      <button data-v="high">High contrast</button>
+    </div>
+
     <h4>Tapping empty space</h4>
     <div class="seg" id="segTapAdd">
       <button data-v="ask" class="sel">Ask first</button>
@@ -1157,6 +1183,9 @@ input[type=file]{display:none;}
 <input type="file" id="paletteFile" accept="image/*">
 <input type="file" id="photoFile" accept="image/*">
 
+<script src="design-tokens.js"></script>
+<script src="schema.js"></script>
+<script src="command.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

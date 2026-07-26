@@ -4,6 +4,7 @@
   // ---------------------------------------------------------------------
   // Constants
   // ---------------------------------------------------------------------
+  // Reassigned by applyTokens() when density changes.
   var NODE_W = 168;            // default box width; each box may override it
   var NODE_H_APPROX = 96;
   var BOX_WIDTHS = [140, 168, 210, 260];
@@ -68,6 +69,7 @@
   // Tapping empty canvas used to create a box instantly, which fires on any
   // stray touch while panning. Ask by default.
   if (!prefs.tapAdd) prefs.tapAdd = 'ask';
+  if (!prefs.contrast) prefs.contrast = 'normal';
   function savePrefs() { try { localStorage.setItem(PREF_KEY, JSON.stringify(prefs)); } catch (e) {} }
   function savePalettes() {
     try { localStorage.setItem(PALETTE_KEY, JSON.stringify(palettes)); } catch (e) {}
@@ -361,6 +363,9 @@
   function bgBase(bg) { return bg.color2 || 'var(--bg)'; }
 
   function migrateChart(c) {
+    // schema.js owns the version ladder; the per-field defaults below stay
+    // here because they reference app constants.
+    if (window.OrgChartSchema) window.OrgChartSchema.migrate(c, { uid: uid });
     c.nodes = c.nodes || {};
     c.edges = c.edges || {};
     c.notes = c.notes || {};
@@ -420,7 +425,8 @@
     return { id: id, name: name || 'Untitled chart', nodes: {}, edges: {}, notes: {}, background: defaultBackground(), font: 'system', badges: 'show', trunk: true, snap: true,
       titleBlock: { show: false, title: '', subtitle: '', date: '', x: null, y: null },
       legend: { show: false, title: 'Key', items: [], x: null, y: null },
-      groups: {},
+      groups: {}, density: 'standard',
+      version: (window.OrgChartSchema ? window.OrgChartSchema.CURRENT_SCHEMA_VERSION : 3),
       updatedAt: Date.now() };
   }
 
@@ -3246,8 +3252,33 @@
     var root = document.documentElement;
     if (v === 'auto') root.removeAttribute('data-theme'); else root.setAttribute('data-theme', v);
     localStorage.setItem('orgchart.theme', v === 'auto' ? '' : v);
+    applyTokens();
   }
+
+  // ---- design tokens -------------------------------------------------
+  // One call republishes every CSS custom property for the current
+  // appearance, density and contrast. Density lives on the chart, contrast
+  // on the device.
+  function applyTokens() {
+    if (!global_tokens) return;
+    var chart = state.charts[state.activeId];
+    global_tokens.apply({
+      appearance: resolvedAppearance(),
+      density: (chart && chart.density) || 'standard',
+      contrast: prefs.contrast === 'high'
+    });
+    cssVarCache = {};
+    // Chart geometry follows density, so the constants the layout code uses
+    // are re-derived rather than frozen at load.
+    var k = global_tokens.chartScale();
+    NODE_W = Math.round(global_tokens.BASE.node.width * k);
+    NODE_H_APPROX = Math.round(global_tokens.BASE.node.height * k);
+    SIB_GAP = Math.round(global_tokens.BASE.node.gapSib * k);
+    LEVEL_GAP = Math.round(global_tokens.BASE.node.gapLevel * k);
+  }
+  var global_tokens = window.OrgChartTokens || null;
   (function initTheme() { var t = getAppearance(); if (t !== 'auto') document.documentElement.setAttribute('data-theme', t); })();
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () { applyTokens(); render(); });
 
   // ---------------------------------------------------------------------
   // Chart design sheet (background, default font, presets, tidy)
@@ -3403,6 +3434,22 @@
       getActiveChart().snap = (v === 'on');
       saveState();
       toast(v === 'on' ? 'Snapping on' : 'Free drag');
+    });
+    wireSeg($('segDensity'), chart.density || 'standard', function (v) {
+      pushUndo();
+      getActiveChart().density = v;
+      saveState();
+      applyTokens();
+      render();
+      fitToScreen();
+      toast(v.charAt(0).toUpperCase() + v.slice(1) + ' spacing');
+    });
+    wireSeg($('segContrast'), prefs.contrast || 'normal', function (v) {
+      prefs.contrast = v;
+      savePrefs();
+      applyTokens();
+      render();
+      toast(v === 'high' ? 'High contrast on' : 'Normal contrast');
     });
     wireSeg($('segTapAdd'), prefs.tapAdd, function (v) {
       prefs.tapAdd = v;
@@ -4367,6 +4414,7 @@
   // Init
   // ---------------------------------------------------------------------
   ensureBootstrapChart();
+  applyTokens();
   // Quiet: merely launching the app must not make this device's charts look
   // newer than an edit waiting on the server.
   saveState(true);
