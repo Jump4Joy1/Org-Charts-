@@ -33,7 +33,113 @@
   };
   var FONT_ORDER = ['system', 'serif', 'rounded', 'mono', 'classic', 'elegant', 'condensed', 'display'];
 
-  var COLOR_SWATCHES = ['#3568d4', '#2f9e6e', '#c2762a', '#a24fd6', '#d6486b', '#2aa1a1', '#6b6f76', '#b5322f', '#e0a13a', '#4f6bd6', '#1a1d21', '#8a6a3a'];
+  var BUILTIN_SWATCHES = ['#3568d4', '#2f9e6e', '#c2762a', '#a24fd6', '#d6486b', '#2aa1a1', '#6b6f76', '#b5322f', '#e0a13a', '#4f6bd6', '#1a1d21', '#8a6a3a'];
+  // The live palette every colour picker draws from. Swapped by the colour-set
+  // manager; kept as one array so pickers need no knowledge of where it came
+  // from. Palettes are an app-level preference, not part of a chart, so they
+  // live under their own storage key and never travel in an export.
+  var COLOR_SWATCHES = BUILTIN_SWATCHES.slice();
+  var PALETTE_KEY = 'orgchart.palettes';
+
+  function defaultPalettes() { return { activeId: 'builtin', sets: {} }; }
+  function loadPalettes() {
+    try {
+      var raw = localStorage.getItem(PALETTE_KEY);
+      if (raw) {
+        var p = JSON.parse(raw);
+        if (!p.sets) p.sets = {};
+        return p;
+      }
+    } catch (e) {}
+    return defaultPalettes();
+  }
+  var palettes = loadPalettes();
+  function savePalettes() {
+    try { localStorage.setItem(PALETTE_KEY, JSON.stringify(palettes)); } catch (e) {}
+  }
+  function activePalette() {
+    var set = palettes.sets[palettes.activeId];
+    return (set && set.colors && set.colors.length) ? set : null;
+  }
+  function applyActivePalette() {
+    var set = activePalette();
+    // User colours lead, with the built-ins kept on the end so nothing a chart
+    // already uses becomes unreachable after switching sets.
+    COLOR_SWATCHES = set ? set.colors.concat(BUILTIN_SWATCHES).slice(0, 24) : BUILTIN_SWATCHES.slice();
+  }
+  applyActivePalette();
+
+  // ---------------------------------------------------------------------
+  // Pull a palette out of a picture
+  //
+  // Buckets pixels into a coarse RGB grid, ranks the buckets by how much of
+  // the image they cover, then drops entries that are nearly grey, nearly
+  // white/black, or too close to one already chosen. That keeps a logo's
+  // actual brand colours and throws away paper and shadow.
+  // ---------------------------------------------------------------------
+  function rgbToHex(r, g, b) {
+    return '#' + [r, g, b].map(function (v) {
+      var h = Math.max(0, Math.min(255, Math.round(v))).toString(16);
+      return h.length === 1 ? '0' + h : h;
+    }).join('');
+  }
+  function colorDistance(a, b) {
+    var dr = a[0] - b[0], dg = a[1] - b[1], db = a[2] - b[2];
+    return Math.sqrt(dr * dr + dg * dg + db * db);
+  }
+  function saturationOf(r, g, b) {
+    var mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+    return mx === 0 ? 0 : (mx - mn) / mx;
+  }
+  function extractPalette(img, count) {
+    count = count || 6;
+    var SIDE = 96;
+    var cv = document.createElement('canvas');
+    cv.width = SIDE; cv.height = SIDE;
+    var cx = cv.getContext('2d', { willReadFrequently: true });
+    cx.drawImage(img, 0, 0, SIDE, SIDE);
+    var data;
+    try { data = cx.getImageData(0, 0, SIDE, SIDE).data; } catch (e) { return []; }
+
+    var STEP = 32; // 8 levels per channel
+    var buckets = {};
+    for (var i = 0; i < data.length; i += 4) {
+      if (data[i + 3] < 128) continue; // ignore transparent pixels
+      var r = data[i], g = data[i + 1], b = data[i + 2];
+      var key = Math.floor(r / STEP) + ',' + Math.floor(g / STEP) + ',' + Math.floor(b / STEP);
+      var e = buckets[key] || (buckets[key] = { n: 0, r: 0, g: 0, b: 0 });
+      e.n++; e.r += r; e.g += g; e.b += b;
+    }
+    var list = Object.keys(buckets).map(function (k) {
+      var e = buckets[k];
+      return { n: e.n, rgb: [e.r / e.n, e.g / e.n, e.b / e.n] };
+    });
+    // Prefer colourful buckets, but weight by how much of the image they are.
+    list.forEach(function (e) {
+      var sat = saturationOf(e.rgb[0], e.rgb[1], e.rgb[2]);
+      var lum = (e.rgb[0] * 0.299 + e.rgb[1] * 0.587 + e.rgb[2] * 0.114) / 255;
+      var edge = (lum < 0.06 || lum > 0.96) ? 0.15 : 1;   // near-black / near-white
+      e.score = e.n * (0.25 + sat * 1.75) * edge;
+    });
+    list.sort(function (a, b) { return b.score - a.score; });
+
+    var out = [];
+    for (var j = 0; j < list.length && out.length < count; j++) {
+      var c = list[j].rgb;
+      var tooClose = out.some(function (o) { return colorDistance(o, c) < 48; });
+      if (!tooClose) out.push(c);
+    }
+    // If the picture really is near-monochrome, fall back to the most common
+    // buckets rather than handing back one lonely swatch.
+    if (out.length < 3) {
+      list.sort(function (a, b) { return b.n - a.n; });
+      for (var k = 0; k < list.length && out.length < count; k++) {
+        var c2 = list[k].rgb;
+        if (!out.some(function (o) { return colorDistance(o, c2) < 30; })) out.push(c2);
+      }
+    }
+    return out.map(function (c) { return rgbToHex(c[0], c[1], c[2]); });
+  }
 
   var TEXTURES = ['none', 'dots', 'lines', 'grid', 'cross'];
   var TEXTURE_LABELS = { none: 'Flat', dots: 'Dots', lines: 'Diagonal', grid: 'Grid', cross: 'Crosshatch' };
@@ -556,6 +662,135 @@
   window.addEventListener('online', function () { syncNow({ silentToast: true }); });
 
   // ---------------------------------------------------------------------
+  // Colour sets sheet
+  // ---------------------------------------------------------------------
+  var paletteBackdrop = $('paletteBackdrop'), paletteSheet = $('paletteSheet');
+  var palDraft = [];
+
+  function openPaletteSheet() {
+    renderPaletteList();
+    renderPalDraft();
+    paletteBackdrop.classList.add('show');
+    paletteSheet.classList.add('show');
+  }
+  function closePaletteSheet() { paletteBackdrop.classList.remove('show'); paletteSheet.classList.remove('show'); }
+
+  function renderPaletteList() {
+    var box = $('paletteList');
+    box.innerHTML = '';
+    var rows = [{ id: 'builtin', name: 'Built-in', colors: BUILTIN_SWATCHES }];
+    Object.keys(palettes.sets).forEach(function (id) {
+      rows.push({ id: id, name: palettes.sets[id].name, colors: palettes.sets[id].colors, custom: true });
+    });
+    rows.forEach(function (set) {
+      var row = document.createElement('div');
+      row.className = 'palrow' + (palettes.activeId === set.id ? ' active' : '');
+      row.innerHTML =
+        '<div class="pname">' + (palettes.activeId === set.id ? '\u25cf ' : '') + escapeHtml(set.name) + '</div>' +
+        '<div class="pdots">' + set.colors.slice(0, 6).map(function (c) {
+          return '<i style="background:' + c + '"></i>';
+        }).join('') + '</div>' +
+        '<button class="rowbtn" data-act="use">Use</button>' +
+        (set.custom ? '<button class="rowbtn danger" data-act="del">Delete</button>' : '');
+      row.querySelector('[data-act="use"]').addEventListener('click', function () {
+        palettes.activeId = set.id;
+        savePalettes();
+        applyActivePalette();
+        renderPaletteList();
+        toast('Using “' + set.name + '”');
+      });
+      var del = row.querySelector('[data-act="del"]');
+      if (del) del.addEventListener('click', function () {
+        if (!window.confirm('Delete the colour set “' + set.name + '”?\n\nCharts keep the colours they already use.')) return;
+        delete palettes.sets[set.id];
+        if (palettes.activeId === set.id) palettes.activeId = 'builtin';
+        savePalettes();
+        applyActivePalette();
+        renderPaletteList();
+      });
+      box.appendChild(row);
+    });
+  }
+
+  function renderPalDraft() {
+    var box = $('palSwatches');
+    box.innerHTML = '';
+    if (!palDraft.length) {
+      box.innerHTML = '<span class="smallmuted">No colours yet — add some, or pull them out of a picture.</span>';
+      return;
+    }
+    palDraft.forEach(function (c, i) {
+      var wrap = document.createElement('div');
+      wrap.className = 'palwrap';
+      wrap.innerHTML = '<button class="swatch" style="background:' + c + '"></button>'
+        + '<button class="del" aria-label="Remove">\u00d7</button>';
+      wrap.querySelector('.del').addEventListener('click', function () {
+        palDraft.splice(i, 1);
+        renderPalDraft();
+      });
+      box.appendChild(wrap);
+    });
+  }
+
+  $('paletteOpenBtn').addEventListener('click', function () { closeMenu(); setTimeout(openPaletteSheet, 120); });
+  $('paletteCloseBtn').addEventListener('click', closePaletteSheet);
+  paletteBackdrop.addEventListener('click', function (e) { if (e.target === paletteBackdrop) closePaletteSheet(); });
+
+  $('palAddColor').addEventListener('click', function () {
+    // The OS colour picker is the only sane way to choose a colour on a phone.
+    var inp = document.createElement('input');
+    inp.type = 'color';
+    inp.value = palDraft[palDraft.length - 1] || '#3568d4';
+    inp.style.cssText = 'position:fixed;left:-100px;top:0;opacity:0;';
+    document.body.appendChild(inp);
+    inp.addEventListener('change', function () {
+      palDraft.push(inp.value);
+      renderPalDraft();
+      inp.remove();
+    });
+    inp.click();
+  });
+
+  var paletteFile = $('paletteFile');
+  $('palFromImage').addEventListener('click', function () { paletteFile.value = ''; paletteFile.click(); });
+  paletteFile.addEventListener('change', function () {
+    var file = paletteFile.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      var img = new Image();
+      img.onload = function () {
+        var found = extractPalette(img, 6);
+        if (!found.length) { toast('Could not read colours from that picture'); return; }
+        // Add to whatever is already in the draft rather than replacing it.
+        found.forEach(function (c) { if (palDraft.indexOf(c) === -1) palDraft.push(c); });
+        renderPalDraft();
+        if (!$('palName').value.trim()) $('palName').value = 'From picture';
+        toast('Pulled ' + found.length + ' colours out of that picture');
+      };
+      img.onerror = function () { toast('That file could not be opened as an image'); };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+
+  $('palClear').addEventListener('click', function () { palDraft = []; $('palName').value = ''; renderPalDraft(); });
+  $('palSave').addEventListener('click', function () {
+    if (!palDraft.length) { toast('Add at least one colour first'); return; }
+    var name = $('palName').value.trim() || 'My colours';
+    var id = uid();
+    palettes.sets[id] = { name: name, colors: palDraft.slice() };
+    palettes.activeId = id;
+    savePalettes();
+    applyActivePalette();
+    palDraft = [];
+    $('palName').value = '';
+    renderPalDraft();
+    renderPaletteList();
+    toast('Saved “' + name + '” and switched to it');
+  });
+
+  // ---------------------------------------------------------------------
   // Sync sheet
   // ---------------------------------------------------------------------
   var SYNC_SQL = [
@@ -916,6 +1151,10 @@
   }
   // Anything longer than plain initials gets a pill-shaped badge, so a
   // nickname stays legible instead of shrinking to fit a small circle.
+  // "Photo only" needs an actual photo; without one it would render an empty
+  // box, so it quietly falls back to the normal card until a picture exists.
+  function isPhotoOnly(n) { return (n.layout === 'photo') && !!n.photo; }
+
   function badgeIsPill(n) {
     return !showsPhoto(n) && badgeText(n).length > 3;
   }
@@ -961,7 +1200,10 @@
     av.style.fontSize = badgeFs.toFixed(1) + 'px';
     av.style.padding = pill ? '0 ' + Math.round(avSize * 0.28) + 'px' : '0 2px';
     av.style.minWidth = pill ? avSize + 'px' : '';
-    av.style.display = showsAvatar(n) ? 'flex' : 'none';
+    var photoOnly = isPhotoOnly(n);
+    av.style.display = (showsAvatar(n) && !photoOnly) ? 'flex' : 'none';
+    el.querySelector('.ntext').style.display = photoOnly ? 'none' : 'flex';
+    if (photoOnly) el.style.padding = '0';
     el.querySelector('.nname').style.fontSize = (14.5 * fs).toFixed(1) + 'px';
     el.querySelector('.ntitle').style.fontSize = (12 * fs).toFixed(1) + 'px';
     el.querySelector('.ndetail').style.fontSize = (11 * fs).toFixed(1) + 'px';
@@ -1010,15 +1252,25 @@
       : (border.dash === 'dotted' ? '1 ' + (sw * 2.2) : '');
     var d = shapePath(n.shape, iw, ih, cornerRadius(n));
     var extra = '';
+    // Photo-only cards clip the picture to the outline itself, so the image
+    // takes the shape rather than sitting in a rectangle behind it.
+    if (isPhotoOnly(n)) {
+      defs += '<clipPath id="' + uid2 + 'c"><path d="' + d + '"/></clipPath>';
+      extra += '<image href="' + n.photo + '" x="0" y="0" width="' + iw + '" height="' + ih + '"'
+        + ' preserveAspectRatio="xMidYMid slice" clip-path="url(#' + uid2 + 'c)"/>';
+      fillAttr = 'none';
+    }
     if (def.kind === 'cylinder') {
       extra = '<path d="' + cylinderLip(iw, ih).lip + '" fill="none" stroke="' + stroke + '" stroke-width="' + sw + '" opacity=".55"/>';
     }
     svg.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
     svg.innerHTML = (defs ? '<defs>' + defs + '</defs>' : '')
       + '<g transform="translate(' + (sw / 2) + ',' + (sw / 2) + ')">'
-      + '<path d="' + d + '" fill="' + fillAttr + '" stroke="' + stroke + '" stroke-width="' + sw + '"'
+      + '<path d="' + d + '" fill="' + fillAttr + '" stroke="none"/>'
+      + extra
+      + '<path d="' + d + '" fill="none" stroke="' + stroke + '" stroke-width="' + sw + '"'
       + (dash ? ' stroke-dasharray="' + dash + '"' : '') + '/>'
-      + extra + '</g>';
+      + '</g>';
   }
 
   var cssVarCache = {};
@@ -2093,6 +2345,10 @@
   }
   fCorner.addEventListener('input', paintCorner);
 
+  function updatePhotoHint() {
+    $('photoHint').style.display = segValue($('segLayout')) === 'photo' ? 'block' : 'none';
+  }
+
   function openEditSheet(id, focusEmpty) {
     editingId = id;
     var chart = getActiveChart();
@@ -2108,7 +2364,8 @@
     wireSeg($('segAvatar'), n.avatarMode || 'auto', drawBadgePreview);
     buildColorRow(colorPicker, n.color || COLOR_SWATCHES[0], drawBadgePreview);
     refreshPhotoPreview(n);
-    wireSeg($('segLayout'), n.layout || 'stack');
+    wireSeg($('segLayout'), n.layout || 'stack', updatePhotoHint);
+    updatePhotoHint();
     wireSeg($('segAlign'), n.align || 'center');
     setFontScaleControls(n);
     setSizeControls(n);
@@ -3378,13 +3635,27 @@
       // Same path generator as the on-screen card, so the two cannot diverge.
       var swX = border.width || 1;
       var pathD = shapePath(shape, W - swX, boxH - swX, cornerRadius(n));
+      var photoOnlyX = isPhotoOnly(n);
+      var photoMarkup = '';
+      if (photoOnlyX) {
+        var pcId = 'pc' + idx;
+        defs.push('<clipPath id="' + pcId + '" clipPathUnits="userSpaceOnUse"><path d="' + pathD + '"/></clipPath>');
+        photoMarkup = '<image href="' + n.photo + '" x="0" y="0" width="' + (W - swX) + '" height="' + (boxH - swX) + '"'
+          + ' preserveAspectRatio="xMidYMid slice" clip-path="url(#' + pcId + ')"/>';
+        fillAttr = 'none';
+      }
       parts.push('<g transform="translate(' + (x + swX / 2) + ',' + (y + swX / 2) + ')">'
-        + '<path d="' + pathD + '" fill="' + fillAttr + '" stroke="' + (border.color || panelLine) + '" stroke-width="' + swX + '"'
+        + '<path d="' + pathD + '" fill="' + fillAttr + '" stroke="none"/>'
+        + photoMarkup
+        + '<path d="' + pathD + '" fill="none" stroke="' + (border.color || panelLine) + '" stroke-width="' + swX + '"'
         + (dashArr2 ? ' stroke-dasharray="' + dashArr2 + '"' : '') + '/>'
         + (sdefX.kind === 'cylinder'
             ? '<path d="' + cylinderLip(W - swX, boxH - swX).lip + '" fill="none" stroke="' + (border.color || panelLine) + '" stroke-width="' + swX + '" opacity=".55"/>'
             : '')
         + '</g>');
+
+      // A photo-only card is just the picture — no badge, no text.
+      if (photoOnlyX) return;
 
       var isRow = (n.layout || 'stack') === 'row';
       var align = n.align || 'center';

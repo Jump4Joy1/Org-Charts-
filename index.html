@@ -370,6 +370,22 @@ svg#guides{position:absolute; left:0; top:0; overflow:visible; pointer-events:no
 .customswatch{width:30px; height:30px; border-radius:50%; border:2px dashed var(--line); flex:0 0 auto; padding:0; position:relative; overflow:hidden; background:conic-gradient(red,yellow,lime,cyan,blue,magenta,red);}
 .customswatch.sel{border-style:solid; border-color:var(--text);}
 .customswatch input{position:absolute; inset:-6px; opacity:0; cursor:pointer; width:150%; height:150%;}
+/* Builder swatches carry a remove badge so a colour pulled from a picture can
+   be dropped before the set is saved. */
+.palwrap{position:relative; flex:0 0 auto;}
+.palwrap .swatch{width:34px; height:34px;}
+.palwrap .del{
+  position:absolute; right:-4px; top:-4px; width:18px; height:18px; border-radius:50%;
+  border:none; background:var(--danger); color:#fff; font-size:12px; line-height:1;
+  display:flex; align-items:center; justify-content:center; padding:0;
+}
+.palrow{display:flex; align-items:center; gap:10px; padding:10px 4px; border-bottom:1px solid var(--line);}
+.palrow .pname{flex:1; font-size:14.5px; font-weight:600; min-width:0;}
+.palrow.active .pname{color:var(--accent);}
+.palrow .pdots{display:flex; gap:3px; flex:0 0 auto;}
+.palrow .pdots i{width:13px; height:13px; border-radius:50%; display:block;}
+.palrow .rowbtn{padding:8px 10px; font-size:12px; font-weight:600; border:none; border-radius:8px; background:var(--panel2); color:var(--text);}
+.palrow .rowbtn.danger{color:var(--danger);}
 .btnrow{display:flex; gap:10px; margin-top:16px; flex-wrap:wrap;}
 .btn{
   flex:1; padding:12px 14px; border-radius:12px; border:none; font-size:15px; font-weight:600; cursor:pointer;
@@ -584,7 +600,12 @@ input[type=file]{display:none;}
         <svg width="26" height="20" viewBox="0 0 26 20"><circle cx="6" cy="10" r="4" fill="currentColor"/><rect x="13" y="6" width="11" height="2.5" rx="1.2" fill="currentColor"/><rect x="13" y="11" width="8" height="2" rx="1" fill="currentColor" opacity=".55"/></svg>
         Compact
       </button>
+      <button data-v="photo">
+        <svg width="26" height="20" viewBox="0 0 26 20"><rect x="2" y="3" width="22" height="14" rx="2" fill="currentColor" opacity=".35"/><circle cx="9" cy="8" r="2" fill="currentColor"/><path d="M3 16 L10 10 L15 14 L19 11 L23 16 Z" fill="currentColor"/></svg>
+        Photo only
+      </button>
     </div>
+    <div class="sizehint" id="photoHint" style="display:none;">The photo fills the whole box and the text is hidden. Attach one with “Choose photo” above.</div>
 
     <h4>Text size</h4>
     <div class="seg" id="segFontScale">
@@ -867,6 +888,9 @@ input[type=file]{display:none;}
       <button class="btn secondary" id="exportOpenBtn">⭳ Export &amp; share</button>
     </div>
     <div class="btnrow">
+      <button class="btn secondary" id="paletteOpenBtn" style="flex:1;">🎨 Colour sets</button>
+    </div>
+    <div class="btnrow">
       <button class="btn secondary" id="syncOpenBtn" style="flex:1;"><span class="syncdot" id="menuSyncDot"></span> <span id="menuSyncLabel">Sync across devices</span></button>
     </div>
     <p class="smallmuted">Everything saves automatically as you work — there’s no save button. <b>Save a copy</b> snapshots a chart so you can rearrange the original and still have the old layout.</p>
@@ -980,6 +1004,32 @@ input[type=file]{display:none;}
   </div>
 </div>
 
+<!-- Colour sets sheet -->
+<div class="sheet-backdrop" id="paletteBackdrop">
+  <div class="sheet" id="paletteSheet">
+    <div class="sheet-handle"></div>
+    <h3>Colour sets</h3>
+    <p class="smallmuted" style="margin-top:0;">The set you pick here fills the colour swatches everywhere in the app. Sets are saved on this device and apply to every chart.</p>
+
+    <h4>Your sets</h4>
+    <div id="paletteList"></div>
+
+    <h4>Build a new set</h4>
+    <div class="field"><label>Name</label><input id="palName" placeholder="Homestead brand" maxlength="40"></div>
+    <div class="colors" id="palSwatches"></div>
+    <div class="btnrow" style="margin-top:8px;">
+      <button class="btn secondary" id="palAddColor">+ Add colour</button>
+      <button class="btn secondary" id="palFromImage">🖼 From a picture</button>
+    </div>
+    <p class="smallmuted">“From a picture” reads a logo or photo and pulls out the colours it actually uses — you can then delete any you don’t want before saving.</p>
+    <div class="btnrow">
+      <button class="btn" id="palSave">Save set</button>
+      <button class="btn secondary" id="palClear">Clear</button>
+    </div>
+    <button class="btn ghost" id="paletteCloseBtn" style="margin-top:6px;">Close</button>
+  </div>
+</div>
+
 <!-- Sync sheet -->
 <div class="sheet-backdrop" id="syncBackdrop">
   <div class="sheet" id="syncSheet">
@@ -1028,6 +1078,7 @@ input[type=file]{display:none;}
 </div>
 
 <input type="file" id="importFile" accept="application/json">
+<input type="file" id="paletteFile" accept="image/*">
 <input type="file" id="photoFile" accept="image/*">
 
 <script src="app.js"></script>
