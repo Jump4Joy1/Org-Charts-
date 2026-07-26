@@ -54,6 +54,21 @@
     return defaultPalettes();
   }
   var palettes = loadPalettes();
+
+  // App-level preferences, kept out of chart data so they follow the device
+  // rather than travelling inside an exported or synced chart.
+  var PREF_KEY = 'orgchart.prefs';
+  var prefs = (function () {
+    try {
+      var raw = localStorage.getItem(PREF_KEY);
+      if (raw) return JSON.parse(raw);
+    } catch (e) {}
+    return {};
+  })();
+  // Tapping empty canvas used to create a box instantly, which fires on any
+  // stray touch while panning. Ask by default.
+  if (!prefs.tapAdd) prefs.tapAdd = 'ask';
+  function savePrefs() { try { localStorage.setItem(PREF_KEY, JSON.stringify(prefs)); } catch (e) {} }
   function savePalettes() {
     try { localStorage.setItem(PALETTE_KEY, JSON.stringify(palettes)); } catch (e) {}
   }
@@ -141,8 +156,12 @@
     return out.map(function (c) { return rgbToHex(c[0], c[1], c[2]); });
   }
 
-  var TEXTURES = ['none', 'dots', 'lines', 'grid', 'cross'];
-  var TEXTURE_LABELS = { none: 'Flat', dots: 'Dots', lines: 'Diagonal', grid: 'Grid', cross: 'Crosshatch' };
+  var TEXTURES = ['none', 'dots', 'bigdots', 'lines', 'vlines', 'hlines', 'grid', 'graph', 'cross', 'checks', 'zigzag', 'weave'];
+  var TEXTURE_LABELS = {
+    none: 'Flat', dots: 'Dots', bigdots: 'Big dots', lines: 'Diagonal', vlines: 'Vertical',
+    hlines: 'Horizontal', grid: 'Grid', graph: 'Graph paper', cross: 'Crosshatch',
+    checks: 'Checks', zigzag: 'Zigzag', weave: 'Weave'
+  };
 
   var PRESETS = {
     ocean: { label: 'Ocean Blue', font: 'system', bg: { type: 'solid', color: '' } },
@@ -338,7 +357,8 @@
     { name: 'Mist', a: '#dfe6f2', b: '#f7fafc', angle: 160 }
   ];
   function defaultBorder() { return { color: '', width: 1, dash: 'solid' }; }
-  function defaultBackground() { return { type: 'solid', color: '', color2: '', texture: 'dots' }; }
+  function defaultBackground() { return { type: 'solid', color: '', color2: '', texture: 'dots', angle: 135, scale: 1 }; }
+  function bgBase(bg) { return bg.color2 || 'var(--bg)'; }
 
   function migrateChart(c) {
     c.nodes = c.nodes || {};
@@ -881,8 +901,13 @@
     if (chip) {
       chip.className = syncEnabled() ? (syncState.status === 'error' ? 'error' : (syncState.status === 'ok' ? 'ok' : '')) : '';
       chip.querySelector('.syncdot').className = cls;
-      $('syncChipText').textContent = !syncEnabled() ? 'Sync off'
-        : (syncState.status === 'error' ? 'Sync !' : (syncState.status === 'syncing' ? 'Syncing' : 'Synced'));
+      var chipLabel = !syncEnabled() ? 'Sync off'
+        : (syncState.status === 'error' ? 'Sync problem' : (syncState.status === 'syncing' ? 'Syncing' : 'Synced'));
+      $('syncChipText').textContent = chipLabel;
+      // The visible text is CSS-gated to the error state; screen readers and
+      // the tests still get the full status here.
+      chip.setAttribute('aria-label', chipLabel);
+      chip.title = chipLabel;
     }
   }
   onSyncChange(refreshSyncUi);
@@ -1064,17 +1089,31 @@
   // ---------------------------------------------------------------------
   // Texture helpers (shared by live CSS render and SVG export)
   // ---------------------------------------------------------------------
-  function textureCss(pattern, ink, base) {
+  // Texture scale multiplies every tile size, so the same pattern can read as
+  // fine paper or bold graphics. Kept in step with svgPatternDef, which draws
+  // the export copy — the two must agree or a PDF stops matching the screen.
+  function texScale(sc) { return Math.max(0.5, Math.min(3, sc || 1)); }
+  function textureCss(pattern, ink, base, sc) {
     ink = ink || '#3568d4';
     base = base || 'var(--panel)';
+    var k = texScale(sc);
+    var u = function (n) { return (n * k).toFixed(2) + 'px'; };
     switch (pattern) {
-      case 'dots': return 'radial-gradient(' + ink + '55 1.3px, transparent 1.3px) 0 0/11px 11px, ' + base;
-      case 'lines': return 'repeating-linear-gradient(45deg, ' + ink + '40 0 2px, transparent 2px 9px), ' + base;
-      case 'grid': return 'linear-gradient(' + ink + '30 1px, transparent 1px) 0 0/14px 14px, linear-gradient(90deg, ' + ink + '30 1px, transparent 1px) 0 0/14px 14px, ' + base;
-      case 'cross': return 'repeating-linear-gradient(45deg, ' + ink + '30 0 2px, transparent 2px 10px), repeating-linear-gradient(-45deg, ' + ink + '30 0 2px, transparent 2px 10px), ' + base;
+      case 'dots': return 'radial-gradient(' + ink + '55 ' + u(1.3) + ', transparent ' + u(1.3) + ') 0 0/' + u(11) + ' ' + u(11) + ', ' + base;
+      case 'bigdots': return 'radial-gradient(' + ink + '45 ' + u(3) + ', transparent ' + u(3) + ') 0 0/' + u(20) + ' ' + u(20) + ', ' + base;
+      case 'lines': return 'repeating-linear-gradient(45deg, ' + ink + '40 0 ' + u(2) + ', transparent ' + u(2) + ' ' + u(9) + '), ' + base;
+      case 'vlines': return 'repeating-linear-gradient(90deg, ' + ink + '35 0 ' + u(1.5) + ', transparent ' + u(1.5) + ' ' + u(10) + '), ' + base;
+      case 'hlines': return 'repeating-linear-gradient(0deg, ' + ink + '35 0 ' + u(1.5) + ', transparent ' + u(1.5) + ' ' + u(10) + '), ' + base;
+      case 'grid': return 'linear-gradient(' + ink + '30 ' + u(1) + ', transparent ' + u(1) + ') 0 0/' + u(14) + ' ' + u(14) + ', linear-gradient(90deg, ' + ink + '30 ' + u(1) + ', transparent ' + u(1) + ') 0 0/' + u(14) + ' ' + u(14) + ', ' + base;
+      case 'graph': return 'linear-gradient(' + ink + '22 ' + u(1) + ', transparent ' + u(1) + ') 0 0/' + u(8) + ' ' + u(8) + ', linear-gradient(90deg, ' + ink + '22 ' + u(1) + ', transparent ' + u(1) + ') 0 0/' + u(8) + ' ' + u(8) + ', linear-gradient(' + ink + '44 ' + u(1.4) + ', transparent ' + u(1.4) + ') 0 0/' + u(40) + ' ' + u(40) + ', linear-gradient(90deg, ' + ink + '44 ' + u(1.4) + ', transparent ' + u(1.4) + ') 0 0/' + u(40) + ' ' + u(40) + ', ' + base;
+      case 'cross': return 'repeating-linear-gradient(45deg, ' + ink + '30 0 ' + u(2) + ', transparent ' + u(2) + ' ' + u(10) + '), repeating-linear-gradient(-45deg, ' + ink + '30 0 ' + u(2) + ', transparent ' + u(2) + ' ' + u(10) + '), ' + base;
+      case 'checks': return 'conic-gradient(' + ink + '22 0 25%, transparent 0 50%, ' + ink + '22 0 75%, transparent 0) 0 0/' + u(18) + ' ' + u(18) + ', ' + base;
+      case 'zigzag': return 'repeating-linear-gradient(135deg, ' + ink + '2e 0 ' + u(2) + ', transparent ' + u(2) + ' ' + u(8) + '), repeating-linear-gradient(45deg, ' + ink + '2e 0 ' + u(2) + ', transparent ' + u(2) + ' ' + u(8) + '), ' + base;
+      case 'weave': return 'repeating-linear-gradient(0deg, ' + ink + '22 0 ' + u(3) + ', transparent ' + u(3) + ' ' + u(6) + '), repeating-linear-gradient(90deg, ' + ink + '22 0 ' + u(3) + ', transparent ' + u(3) + ' ' + u(6) + '), ' + base;
       default: return base;
     }
   }
+  var TEXTURE_KEYS = ['none', 'dots', 'bigdots', 'lines', 'vlines', 'hlines', 'grid', 'graph', 'cross', 'checks', 'zigzag', 'weave'];
 
   // ---------------------------------------------------------------------
   // Contrast helpers — keep box text legible on any fill the user picks
@@ -1262,8 +1301,8 @@
     document.documentElement.style.setProperty('--chart-font', FONT_STACKS[chart.font] || FONT_STACKS.system);
     var bg = chart.background || defaultBackground();
     var css;
-    if (bg.type === 'gradient') css = 'linear-gradient(135deg, ' + (bg.color || 'var(--panel2)') + ', ' + (bg.color2 || 'var(--bg)') + ')';
-    else if (bg.type === 'texture') css = textureCss(bg.texture, bg.color || '#6b7684', 'var(--bg)');
+    if (bg.type === 'gradient') css = 'linear-gradient(' + fillAngle(bg) + 'deg, ' + (bg.color || 'var(--panel2)') + ', ' + (bg.color2 || 'var(--bg)') + ')';
+    else if (bg.type === 'texture') css = textureCss(bg.texture, bg.color || '#6b7684', bgBase(bg), bg.scale);
     else css = bg.color || 'var(--bg)';
     stage.style.background = css;
   }
@@ -1340,7 +1379,7 @@
         + '<stop offset="1" stop-color="' + (fill.color2 || '#c3d1ea') + '"/></linearGradient>';
       fillAttr = 'url(#' + uid2 + 'g)';
     } else if (fill.type === 'texture' && fill.texture !== 'none') {
-      defs += svgPatternDef(uid2 + 'p', fill.texture, fill.color || n.color || '#3568d4', cssVar('--panel'));
+      defs += svgPatternDef(uid2 + 'p', fill.texture, fill.color || n.color || '#3568d4', cssVar('--panel'), fill.scale);
       fillAttr = 'url(#' + uid2 + 'p)';
     } else {
       fillAttr = fill.color || cssVar('--panel');
@@ -2003,6 +2042,45 @@
     el.addEventListener('pointercancel', up);
   }
 
+  function addBoxAtClient(pos) {
+    var pt = clientToCanvas(pos.x, pos.y);
+    pushUndo();
+    var newId = createNodeAt(pt.x - NODE_W / 2, pt.y - NODE_H_APPROX / 2, true);
+    saveState(); render();
+    openEditSheet(newId, true);
+  }
+
+  var tapBackdrop = $('tapBackdrop'), tapSheet = $('tapSheet');
+  var pendingTapPos = null, tapNeverAskChecked = false;
+  function askAddBox(pos) {
+    pendingTapPos = pos;
+    tapNeverAskChecked = false;
+    $('tapNeverAsk').classList.remove('on');
+    $('tapNeverAsk').querySelector('.cbox').textContent = '';
+    tapBackdrop.classList.add('show');
+    tapSheet.classList.add('show');
+  }
+  function closeTapSheet() { tapBackdrop.classList.remove('show'); tapSheet.classList.remove('show'); pendingTapPos = null; }
+  $('tapNeverAsk').addEventListener('click', function () {
+    tapNeverAskChecked = !tapNeverAskChecked;
+    this.classList.toggle('on', tapNeverAskChecked);
+    this.querySelector('.cbox').textContent = tapNeverAskChecked ? '\u2713' : '';
+  });
+  $('tapAdd').addEventListener('click', function () {
+    var pos = pendingTapPos;
+    if (tapNeverAskChecked) { prefs.tapAdd = 'always'; savePrefs(); }
+    closeTapSheet();
+    if (pos) addBoxAtClient(pos);
+  });
+  $('tapCancel').addEventListener('click', closeTapSheet);
+  $('tapNeverAdd').addEventListener('click', function () {
+    prefs.tapAdd = 'never';
+    savePrefs();
+    closeTapSheet();
+    toast('Tapping empty space won\u2019t add boxes — use the + button');
+  });
+  tapBackdrop.addEventListener('click', function (e) { if (e.target === tapBackdrop) closeTapSheet(); });
+
   function showHint(msg) { hintEl.textContent = msg; hintEl.classList.add('show'); }
   function hideHint() { hintEl.classList.remove('show'); }
 
@@ -2068,12 +2146,9 @@
     } else {
       panStart = null;
     }
-    if (keys.length === 0 && wasTap && tapPos) {
-      var pt2 = clientToCanvas(tapPos.x, tapPos.y);
-      pushUndo();
-      var newId = createNodeAt(pt2.x - NODE_W / 2, pt2.y - NODE_H_APPROX / 2, true);
-      saveState(); render();
-      openEditSheet(newId, true);
+    if (keys.length === 0 && wasTap && tapPos && prefs.tapAdd !== 'never') {
+      if (prefs.tapAdd === 'ask') askAddBox(tapPos);
+      else addBoxAtClient(tapPos);
     }
     tapCandidate = null;
   }
@@ -3090,16 +3165,100 @@
   // ---------------------------------------------------------------------
   var segBgType = $('segBgType'), bgColorPicker = $('bgColorPicker'), bgColor2Picker = $('bgColor2Picker'), bgTextureGrid = $('bgTextureGrid'), chartFontSel = $('chartFont');
 
+  var fBgAngle = $('fBgAngle'), fBgScale = $('fBgScale');
+
+  // Two dozen ready-made canvases. Every one is just a background object, so
+  // picking one still leaves each part editable underneath.
+  var BG_PRESETS = [
+    { t: 'solid', c: '' },
+    { t: 'solid', c: '#ffffff' }, { t: 'solid', c: '#f4f6f8' }, { t: 'solid', c: '#e8eef7' },
+    { t: 'solid', c: '#f6f1e7' }, { t: 'solid', c: '#eef4ee' }, { t: 'solid', c: '#2b3038' }, { t: 'solid', c: '#12161c' },
+    { t: 'gradient', c: '#eaf1fb', c2: '#ffffff', a: 160 },
+    { t: 'gradient', c: '#dfe8f5', c2: '#f7fafc', a: 135 },
+    { t: 'gradient', c: '#f7e9d7', c2: '#fffaf3', a: 120 },
+    { t: 'gradient', c: '#e6f2ea', c2: '#ffffff', a: 150 },
+    { t: 'gradient', c: '#3d4c63', c2: '#1b2129', a: 160 },
+    { t: 'gradient', c: '#1f3b57', c2: '#0d1620', a: 135 },
+    { t: 'gradient', c: '#5b3f6e', c2: '#241a2c', a: 140 },
+    { t: 'gradient', c: '#8a5a3b', c2: '#2a1d14', a: 150 },
+    { t: 'texture', tex: 'dots', c: '#8a94a6', c2: '#ffffff', sc: 1 },
+    { t: 'texture', tex: 'grid', c: '#8a94a6', c2: '#fbfcfd', sc: 1 },
+    { t: 'texture', tex: 'graph', c: '#5b8fd6', c2: '#fbfdff', sc: 1 },
+    { t: 'texture', tex: 'cross', c: '#a08a6a', c2: '#faf6ee', sc: 1 },
+    { t: 'texture', tex: 'checks', c: '#8a94a6', c2: '#f4f6f8', sc: 1 },
+    { t: 'texture', tex: 'hlines', c: '#9aa4b2', c2: '#ffffff', sc: 1.2 },
+    { t: 'texture', tex: 'weave', c: '#7d8ea6', c2: '#eef2f6', sc: 1.4 },
+    { t: 'texture', tex: 'graph', c: '#6f8fbf', c2: '#16202b', sc: 1 }
+  ];
+  function presetToBg(p) {
+    return { type: p.t, color: p.c || '', color2: p.c2 || '', texture: p.tex || 'dots', angle: p.a || 135, scale: p.sc || 1 };
+  }
+  function bgPreviewCss(bg) {
+    if (bg.type === 'gradient') return 'linear-gradient(' + fillAngle(bg) + 'deg,' + (bg.color || '#dfe8f5') + ',' + (bg.color2 || '#ffffff') + ')';
+    if (bg.type === 'texture') return textureCss(bg.texture, bg.color || '#8a94a6', bg.color2 || '#ffffff', bg.scale);
+    return bg.color || 'var(--bg)';
+  }
+  function sameBg(a, b) {
+    return a.type === b.type && (a.color || '') === (b.color || '') && (a.color2 || '') === (b.color2 || '')
+      && (a.type !== 'texture' || a.texture === b.texture);
+  }
+  function buildBgPresets() {
+    var box = $('bgPresets');
+    var current = getActiveChart().background || defaultBackground();
+    box.innerHTML = '';
+    BG_PRESETS.forEach(function (p) {
+      var bg = presetToBg(p);
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'bgswatch' + (sameBg(bg, current) ? ' sel' : '');
+      b.style.background = bgPreviewCss(bg);
+      b.title = p.t + (p.tex ? ' · ' + p.tex : '');
+      b.addEventListener('click', function () {
+        pushUndo();
+        getActiveChart().background = bg;
+        saveState();
+        applyChartVars();
+        openDesign();
+        toast('Background applied');
+      });
+      box.appendChild(b);
+    });
+  }
+
   function updateBgPickerVisibility() {
     var t = segValue(segBgType);
-    bgColor2Picker.style.display = t === 'gradient' ? 'flex' : 'none';
-    bgTextureGrid.style.display = t === 'texture' ? 'flex' : 'none';
+    $('bgSecondBlock').style.display = (t === 'gradient' || t === 'texture') ? 'block' : 'none';
+    $('bgAngleRow').style.display = t === 'gradient' ? 'flex' : 'none';
+    $('bgTextureBlock').style.display = t === 'texture' ? 'block' : 'none';
+    $('bgInkLabel').textContent = t === 'texture' ? 'Pattern colour' : 'Colour';
+    $('bgBaseLabel').textContent = t === 'texture' ? 'Behind the pattern' : 'Second colour';
+    $('fBgAngleVal').textContent = fBgAngle.value + '\u00b0';
+    $('fBgScaleVal').textContent = fBgScale.value + '%';
   }
   function applyBgLive() {
     var chart = getActiveChart();
-    chart.background = { type: segValue(segBgType), color: bgColorPicker.dataset.value, color2: bgColor2Picker.dataset.value, texture: bgTextureGrid.dataset.value };
+    chart.background = {
+      type: segValue(segBgType),
+      color: bgColorPicker.dataset.value,
+      color2: bgColor2Picker.dataset.value,
+      texture: bgTextureGrid.dataset.value,
+      angle: parseInt(fBgAngle.value, 10),
+      scale: parseInt(fBgScale.value, 10) / 100
+    };
+    updateBgPickerVisibility();
     applyChartVars();
+    // Keep the gallery highlight honest as the pieces are tweaked by hand.
+    var box = $('bgPresets');
+    if (box) {
+      var kids = box.querySelectorAll('.bgswatch');
+      BG_PRESETS.forEach(function (p, i) {
+        if (kids[i]) kids[i].classList.toggle('sel', sameBg(presetToBg(p), chart.background));
+      });
+    }
   }
+  fBgAngle.addEventListener('input', applyBgLive);
+  fBgScale.addEventListener('input', applyBgLive);
+
   function onBgTypeChange(newType) {
     if (newType === 'texture' && (bgColorPicker.dataset.value === '#eef1f4' || !bgColorPicker.dataset.value)) {
       buildColorRow(bgColorPicker, '#6b7684', applyBgLive);
@@ -3121,7 +3280,7 @@
       card.addEventListener('click', function () {
         pushUndo();
         var chart = getActiveChart();
-        chart.background = { type: p.bg.type, color: p.bg.color || '', color2: p.bg.color2 || '', texture: p.bg.texture || 'dots' };
+        chart.background = { type: p.bg.type, color: p.bg.color || '', color2: p.bg.color2 || '', texture: p.bg.texture || 'dots', angle: p.bg.angle || 135, scale: p.bg.scale || 1 };
         chart.font = p.font;
         saveState();
         openDesign();
@@ -3141,6 +3300,9 @@
     buildColorRow(bgColorPicker, bg.color || bgInkFallback, applyBgLive);
     buildColorRow(bgColor2Picker, bg.color2 || '#dbe0e6', applyBgLive);
     buildTextureGrid(bgTextureGrid, bg.texture || 'dots', bg.color || '#6b7684', applyBgLive);
+    fBgAngle.value = String(fillAngle(bg));
+    fBgScale.value = String(Math.round(texScale(bg.scale) * 100));
+    buildBgPresets();
     updateBgPickerVisibility();
     wireSeg($('segTrunk'), chart.trunk === false ? 'separate' : 'trunk', function (v) {
       pushUndo();
@@ -3152,6 +3314,11 @@
       getActiveChart().snap = (v === 'on');
       saveState();
       toast(v === 'on' ? 'Snapping on' : 'Free drag');
+    });
+    wireSeg($('segTapAdd'), prefs.tapAdd, function (v) {
+      prefs.tapAdd = v;
+      savePrefs();
+      toast(v === 'ask' ? 'Will ask before adding' : (v === 'always' ? 'Tap adds a box' : 'Tapping won\u2019t add boxes'));
     });
     wireSeg($('segChartBadges'), chart.badges || 'show', function (v) {
       pushUndo();
@@ -3179,7 +3346,14 @@
     designBackdrop.classList.add('show');
     designSheet.classList.add('show');
   }
-  function closeDesign() { designBackdrop.classList.remove('show'); designSheet.classList.remove('show'); }
+  // Background edits are applied live to the chart object, so dismissing the
+  // sheet by tapping outside used to drop them on the floor — only the Done
+  // button ever wrote to disk. Persist on any close.
+  function closeDesign() {
+    designBackdrop.classList.remove('show');
+    designSheet.classList.remove('show');
+    saveState();
+  }
   $('designBtn').addEventListener('click', openDesign);
   $('designOpenBtn').addEventListener('click', function () { closeMenu(); openDesign(); });
   $('designDoneBtn').addEventListener('click', function () {
@@ -3636,12 +3810,14 @@
     parts.push('<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + ' ' + H + '" font-family="' + fontFamily + '">');
     var bg = chart.background || defaultBackground();
     if (bg.type === 'gradient') {
-      defs.push('<linearGradient id="bgGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="' + (bg.color || panelLine) + '"/><stop offset="1" stop-color="' + (bg.color2 || pageBg) + '"/></linearGradient>');
+      var bgv = angleVector(fillAngle(bg));
+      defs.push('<linearGradient id="bgGrad" x1="' + bgv.x1 + '" y1="' + bgv.y1 + '" x2="' + bgv.x2 + '" y2="' + bgv.y2 + '"><stop offset="0" stop-color="' + (bg.color || panelLine) + '"/><stop offset="1" stop-color="' + (bg.color2 || pageBg) + '"/></linearGradient>');
       parts.push('<rect x="0" y="0" width="' + W + '" height="' + H + '" fill="url(#bgGrad)"/>');
     } else if (bg.type === 'texture' && bg.texture !== 'none') {
       var pid = 'bgpat';
-      defs.push(svgPatternDef(pid, bg.texture, bg.color || mutedColor, pageBg));
-      parts.push('<rect x="0" y="0" width="' + W + '" height="' + H + '" fill="' + pageBg + '"/>');
+      var bgBaseX = (bg.color2 && bg.color2.charAt(0) === '#') ? bg.color2 : pageBg;
+      defs.push(svgPatternDef(pid, bg.texture, bg.color || mutedColor, bgBaseX, bg.scale));
+      parts.push('<rect x="0" y="0" width="' + W + '" height="' + H + '" fill="' + bgBaseX + '"/>');
       parts.push('<rect x="0" y="0" width="' + W + '" height="' + H + '" fill="url(#' + pid + ')"/>');
     } else {
       parts.push('<rect x="0" y="0" width="' + W + '" height="' + H + '" fill="' + (bg.color || pageBg) + '"/>');
@@ -3725,7 +3901,7 @@
         fillAttr = 'url(#' + gid + ')';
       } else if (fill.type === 'texture' && fill.texture !== 'none') {
         var tid = 'nt' + idx;
-        defs.push(svgPatternDef(tid, fill.texture, fill.color || accent, panelBg));
+        defs.push(svgPatternDef(tid, fill.texture, fill.color || accent, panelBg, fill.scale));
         fillAttr = 'url(#' + tid + ')';
       } else fillAttr = fill.color || panelBg;
       var border = n.border || defaultBorder();
@@ -3957,16 +4133,61 @@
     return lines.length ? lines : [''];
   }
 
-  function svgPatternDef(id, pattern, ink, base) {
-    var content;
+  function svgPatternDef(id, pattern, ink, base, sc) {
+    var k = texScale(sc);
+    // Mirrors textureCss tile-for-tile so an export matches the screen.
+    function pat(size, body, extraOpacity) {
+      var sz = (size * k).toFixed(2);
+      return '<pattern id="' + id + '" width="' + sz + '" height="' + sz + '" patternUnits="userSpaceOnUse"'
+        + ' patternTransform="scale(1)">' + '<rect width="' + sz + '" height="' + sz + '" fill="' + base + '"/>'
+        + body(size * k) + '</pattern>';
+    }
     switch (pattern) {
-      case 'dots': content = '<rect width="11" height="11" fill="' + base + '"/><circle cx="2" cy="2" r="1.3" fill="' + ink + '" opacity=".5"/>'; return '<pattern id="' + id + '" width="11" height="11" patternUnits="userSpaceOnUse">' + content + '</pattern>';
-      case 'lines': content = '<rect width="9" height="9" fill="' + base + '"/><line x1="0" y1="9" x2="9" y2="0" stroke="' + ink + '" stroke-width="2" opacity=".4"/>'; return '<pattern id="' + id + '" width="9" height="9" patternUnits="userSpaceOnUse">' + content + '</pattern>';
-      case 'grid': content = '<rect width="14" height="14" fill="' + base + '"/><path d="M0,0 H14 M0,0 V14" stroke="' + ink + '" stroke-width="1" opacity=".3"/>'; return '<pattern id="' + id + '" width="14" height="14" patternUnits="userSpaceOnUse">' + content + '</pattern>';
-      case 'cross': content = '<rect width="10" height="10" fill="' + base + '"/><line x1="0" y1="10" x2="10" y2="0" stroke="' + ink + '" stroke-width="1.4" opacity=".35"/><line x1="0" y1="0" x2="10" y2="10" stroke="' + ink + '" stroke-width="1.4" opacity=".35"/>'; return '<pattern id="' + id + '" width="10" height="10" patternUnits="userSpaceOnUse">' + content + '</pattern>';
-      default: return '<pattern id="' + id + '" width="4" height="4" patternUnits="userSpaceOnUse"><rect width="4" height="4" fill="' + base + '"/></pattern>';
+      case 'dots':
+        return pat(11, function (u) { return '<circle cx="' + (u * 0.18) + '" cy="' + (u * 0.18) + '" r="' + (1.3 * k) + '" fill="' + ink + '" opacity=".5"/>'; });
+      case 'bigdots':
+        return pat(20, function (u) { return '<circle cx="' + (u * 0.3) + '" cy="' + (u * 0.3) + '" r="' + (3 * k) + '" fill="' + ink + '" opacity=".42"/>'; });
+      case 'lines':
+        return pat(9, function (u) { return '<line x1="0" y1="' + u + '" x2="' + u + '" y2="0" stroke="' + ink + '" stroke-width="' + (2 * k) + '" opacity=".4"/>'; });
+      case 'vlines':
+        return pat(10, function (u) { return '<line x1="0" y1="0" x2="0" y2="' + u + '" stroke="' + ink + '" stroke-width="' + (1.5 * k) + '" opacity=".35"/>'; });
+      case 'hlines':
+        return pat(10, function (u) { return '<line x1="0" y1="0" x2="' + u + '" y2="0" stroke="' + ink + '" stroke-width="' + (1.5 * k) + '" opacity=".35"/>'; });
+      case 'grid':
+        return pat(14, function (u) { return '<path d="M0,0 H' + u + ' M0,0 V' + u + '" stroke="' + ink + '" stroke-width="' + (1 * k) + '" opacity=".3" fill="none"/>'; });
+      case 'graph':
+        return pat(40, function (u) {
+          var minor = u / 5, out = '';
+          for (var i = 1; i < 5; i++) {
+            out += '<path d="M0,' + (minor * i) + ' H' + u + ' M' + (minor * i) + ',0 V' + u + '" stroke="' + ink + '" stroke-width="' + (1 * k) + '" opacity=".18" fill="none"/>';
+          }
+          return out + '<path d="M0,0 H' + u + ' M0,0 V' + u + '" stroke="' + ink + '" stroke-width="' + (1.4 * k) + '" opacity=".38" fill="none"/>';
+        });
+      case 'cross':
+        return pat(10, function (u) {
+          return '<line x1="0" y1="' + u + '" x2="' + u + '" y2="0" stroke="' + ink + '" stroke-width="' + (1.4 * k) + '" opacity=".35"/>'
+            + '<line x1="0" y1="0" x2="' + u + '" y2="' + u + '" stroke="' + ink + '" stroke-width="' + (1.4 * k) + '" opacity=".35"/>';
+        });
+      case 'checks':
+        return pat(18, function (u) {
+          var h = u / 2;
+          return '<rect width="' + h + '" height="' + h + '" fill="' + ink + '" opacity=".13"/>'
+            + '<rect x="' + h + '" y="' + h + '" width="' + h + '" height="' + h + '" fill="' + ink + '" opacity=".13"/>';
+        });
+      case 'zigzag':
+        return pat(8, function (u) {
+          return '<path d="M0,' + u + ' L' + (u / 2) + ',0 L' + u + ',' + u + '" fill="none" stroke="' + ink + '" stroke-width="' + (1.6 * k) + '" opacity=".3"/>';
+        });
+      case 'weave':
+        return pat(6, function (u) {
+          return '<rect width="' + u + '" height="' + (3 * k) + '" fill="' + ink + '" opacity=".13"/>'
+            + '<rect width="' + (3 * k) + '" height="' + u + '" fill="' + ink + '" opacity=".13"/>';
+        });
+      default:
+        return '<pattern id="' + id + '" width="4" height="4" patternUnits="userSpaceOnUse"><rect width="4" height="4" fill="' + base + '"/></pattern>';
     }
   }
+
 
   // -------------------------------------------------------------------
   // Page framing for PDF / print
