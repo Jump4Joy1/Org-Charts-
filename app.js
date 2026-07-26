@@ -468,20 +468,25 @@
   var SYNC_POLL_MS = 20000;      // background pull cadence while the app is open
   var SYNC_DEBOUNCE_MS = 1200;   // settle time after an edit before pushing
 
-  function defaultSyncCfg() { return { url: '', key: '', space: '', pushed: {}, lastPull: 0 }; }
+  function defaultSyncCfg() {
+    return { url: '', key: '', email: '', token: '', refresh: '', expires: 0, pushed: {} };
+  }
   function loadSyncCfg() {
     try {
       var raw = localStorage.getItem(SYNC_KEY);
       if (raw) {
         var c = JSON.parse(raw);
         if (!c.pushed) c.pushed = {};
+        // Charts used to be grouped by a shared code. That identity is gone;
+        // signing in re-uploads from whichever device you sign in on.
+        if (c.space) { delete c.space; c.pushed = {}; }
         return c;
       }
     } catch (e) {}
     return defaultSyncCfg();
   }
   // Kept out of the chart store on purpose: exporting a chart must never
-  // hand somebody your sync code.
+  // hand somebody your session.
   function saveSyncCfg() {
     try { localStorage.setItem(SYNC_KEY, JSON.stringify(syncCfg)); } catch (e) {}
   }
@@ -494,45 +499,99 @@
     syncState.detail = detail || '';
     syncListeners.forEach(function (fn) { try { fn(); } catch (e) {} });
   }
-  function syncEnabled() { return !!(syncCfg.url && syncCfg.key && syncCfg.space); }
-  function newSyncCode() {
-    // 24 chars of randomness — this is the capability that guards the data,
-    // so it has to be unguessable, not memorable.
-    var abc = 'abcdefghjkmnpqrstuvwxyz23456789';
-    var out = '';
-    var buf = null;
-    try { buf = new Uint8Array(24); crypto.getRandomValues(buf); } catch (e) {}
-    for (var i = 0; i < 24; i++) {
-      var r = buf ? buf[i] : Math.floor(Math.random() * 256);
-      out += abc[r % abc.length];
-      if (i % 6 === 5 && i < 23) out += '-';
-    }
-    return out;
-  }
-  function normalizeSyncCode(s) { return (s || '').trim().toLowerCase().replace(/[^a-z0-9-]/g, ''); }
-  function normalizeUrl(s) { return (s || '').trim().replace(/\/+$/, ''); }
+  function hasProject() { return !!(syncCfg.url && syncCfg.key); }
+  function signedIn() { return hasProject() && !!syncCfg.token; }
+  function syncEnabled() { return signedIn(); }
+  function normalizeUrl(u) { return (u || '').trim().replace(/\/+$/, ''); }
 
-  function syncRpc(fn, body) {
-    var url = normalizeUrl(syncCfg.url) + '/rest/v1/rpc/' + fn;
-    return fetch(url, {
-      method: 'POST',
-      headers: {
-        'apikey': syncCfg.key,
-        'Authorization': 'Bearer ' + syncCfg.key,
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-      },
-      body: JSON.stringify(body)
+  function httpJson(path, opts) {
+    opts = opts || {};
+    var headers = { 'apikey': syncCfg.key, 'Content-Type': 'application/json', 'Accept': 'application/json' };
+    headers['Authorization'] = 'Bearer ' + (opts.bearer || syncCfg.token || syncCfg.key);
+    if (opts.headers) Object.keys(opts.headers).forEach(function (k) { headers[k] = opts.headers[k]; });
+    return fetch(normalizeUrl(syncCfg.url) + path, {
+      method: opts.method || 'POST',
+      headers: headers,
+      body: opts.body ? JSON.stringify(opts.body) : undefined
     }).then(function (res) {
       return res.text().then(function (text) {
+        var data = null;
+        try { data = text ? JSON.parse(text) : null; } catch (e) {}
         if (!res.ok) {
-          var msg = 'HTTP ' + res.status;
-          try { var j = JSON.parse(text); msg = j.message || j.hint || msg; } catch (e) {}
+          var msg = (data && (data.msg || data.message || data.error_description || data.error)) || ('HTTP ' + res.status);
           if (res.status === 404) msg = 'Setup step missing — run the SQL in your Supabase project';
-          if (res.status === 401 || res.status === 403) msg = 'Project URL or key rejected';
-          throw new Error(msg);
+          if (res.status === 401 && /JWT|token/i.test(msg)) msg = 'Session expired';
+          var err = new Error(msg);
+          err.status = res.status;
+          throw err;
         }
-        try { return text ? JSON.parse(text) : null; } catch (e) { return null; }
+        return data;
+      });
+    });
+  }
+
+  // ---- email sign-in --------------------------------------------------
+  // Supabase's OTP endpoints, called directly so the app needs no SDK. The
+  // emailed code is typed into the app rather than followed as a link: on
+  // iOS a magic link opens Safari, which has separate storage from the
+  // home-screen app, so the link would sign in the wrong place.
+  function authRequestCode(email) {
+    return httpJson('/auth/v1/otp', { bearer: syncCfg.key, body: { email: email, create_user: true } });
+  }
+  function authVerifyCode(email, code) {
+    return httpJson('/auth/v1/verify', { bearer: syncCfg.key, body: { email: email, token: code, type: 'email' } })
+      .then(function (data) {
+        if (!data || !data.access_token) throw new Error('That code was not accepted');
+        syncCfg.email = email;
+        syncCfg.token = data.access_token;
+        syncCfg.refresh = data.refresh_token || '';
+        syncCfg.expires = Date.now() + ((data.expires_in || 3600) * 1000);
+        syncCfg.pushed = {};
+        saveSyncCfg();
+        return data;
+      });
+  }
+  function authRefresh() {
+    if (!syncCfg.refresh) return Promise.reject(new Error('Signed out — sign in again'));
+    return httpJson('/auth/v1/token?grant_type=refresh_token', {
+      bearer: syncCfg.key,
+      body: { refresh_token: syncCfg.refresh }
+    }).then(function (data) {
+      if (!data || !data.access_token) throw new Error('Signed out — sign in again');
+      syncCfg.token = data.access_token;
+      syncCfg.refresh = data.refresh_token || syncCfg.refresh;
+      syncCfg.expires = Date.now() + ((data.expires_in || 3600) * 1000);
+      saveSyncCfg();
+      return data;
+    });
+  }
+  function authSignOut() {
+    syncCfg.email = ''; syncCfg.token = ''; syncCfg.refresh = ''; syncCfg.expires = 0; syncCfg.pushed = {};
+    saveSyncCfg();
+    clearInterval(syncPollTimer);
+    setSyncStatus('off');
+  }
+  // Renew a minute before expiry rather than discovering it mid-sync.
+  function withSession(fn) {
+    if (!signedIn()) return Promise.reject(new Error('Not signed in'));
+    var soon = Date.now() > (syncCfg.expires - 60000);
+    var ready = soon ? authRefresh() : Promise.resolve();
+    return ready.then(fn).catch(function (err) {
+      if (err && err.status === 401 && syncCfg.refresh) return authRefresh().then(fn);
+      throw err;
+    });
+  }
+
+  // ---- chart transport -------------------------------------------------
+  function remotePull() {
+    return withSession(function () {
+      return httpJson('/rest/v1/oc_charts_v2?select=chart_id,payload,deleted,updated_at', { method: 'GET' });
+    });
+  }
+  function remoteSave(chartId, payload, deleted, stamp) {
+    return withSession(function () {
+      return httpJson('/rest/v1/rpc/oc_save', {
+        body: { p_chart_id: chartId, p_payload: payload, p_deleted: !!deleted, p_updated_at: stamp }
       });
     });
   }
@@ -560,13 +619,7 @@
         var chart = state.charts[id];
         var isDel = !chart;
         var stamp = isDel ? state.deleted[id] : chart.updatedAt;
-        return syncRpc('oc_push', {
-          p_space: syncCfg.space,
-          p_chart_id: id,
-          p_payload: isDel ? null : chart,
-          p_deleted: isDel,
-          p_updated_at: stamp
-        }).then(function () {
+        return remoteSave(id, isDel ? null : chart, isDel, stamp).then(function () {
           syncCfg.pushed[id] = stamp;
           done++;
         });
@@ -575,7 +628,7 @@
     return chain.then(function () { saveSyncCfg(); return done; });
   }
 
-  // Fold the server's rows into local state. Returns true if anything here
+  // Fold the server's rows into local state. Returns whether anything here
   // actually changed, so the caller knows whether to re-render.
   function mergeRemote(rows) {
     var changed = false;
@@ -629,10 +682,9 @@
     // Push first so this device's edits are on the server before the pull
     // decides who wins.
     return syncPushOnce()
-      .then(function () { return syncRpc('oc_pull', { p_space: syncCfg.space, p_since: 0 }); })
+      .then(remotePull)
       .then(function (rows) {
         var res = mergeRemote(rows);
-        syncCfg.lastPull = Date.now();
         saveSyncCfg();
         syncState.lastOk = Date.now();
         setSyncStatus('ok');
@@ -647,8 +699,9 @@
         return res.changed;
       })
       .catch(function (err) {
-        setSyncStatus('error', err && err.message ? err.message : 'Sync failed');
-        if (opts.announce) toast('Sync failed — ' + syncState.detail);
+        var msg = (err && err.message) ? err.message : 'Sync failed';
+        setSyncStatus('error', msg);
+        if (opts.announce) toast('Sync failed — ' + msg);
         return false;
       })
       .then(function (r) {
@@ -814,56 +867,78 @@
   // Sync sheet
   // ---------------------------------------------------------------------
   var SYNC_SQL = [
-    'create table if not exists public.oc_charts (',
-    '  space      text   not null,',
-    '  chart_id   text   not null,',
+    'create table if not exists public.oc_charts_v2 (',
+    '  user_id    uuid    not null references auth.users(id) on delete cascade,',
+    '  chart_id   text    not null,',
     '  payload    jsonb,',
     '  deleted    boolean not null default false,',
-    '  updated_at bigint not null,',
-    '  primary key (space, chart_id)',
+    '  updated_at bigint  not null,',
+    '  primary key (user_id, chart_id)',
     ');',
     '',
-    'alter table public.oc_charts enable row level security;',
-    'revoke all on table public.oc_charts from anon, authenticated;',
+    'alter table public.oc_charts_v2 enable row level security;',
     '',
-    'create or replace function public.oc_pull(p_space text, p_since bigint default 0)',
-    'returns table (chart_id text, payload jsonb, deleted boolean, updated_at bigint)',
-    'language sql security definer set search_path = public as $$',
-    '  select c.chart_id, c.payload, c.deleted, c.updated_at',
-    '  from public.oc_charts c',
-    '  where c.space = p_space and length(p_space) >= 16',
-    '    and c.updated_at > coalesce(p_since, 0);',
-    '$$;',
+    'drop policy if exists "read own charts"   on public.oc_charts_v2;',
+    'drop policy if exists "insert own charts" on public.oc_charts_v2;',
+    'drop policy if exists "update own charts" on public.oc_charts_v2;',
     '',
-    'create or replace function public.oc_push(',
-    '  p_space text, p_chart_id text, p_payload jsonb,',
-    '  p_deleted boolean, p_updated_at bigint',
-    ') returns bigint language plpgsql security definer set search_path = public as $$',
-    'declare v_existing bigint;',
+    'create policy "read own charts" on public.oc_charts_v2',
+    '  for select to authenticated using (user_id = auth.uid());',
+    'create policy "insert own charts" on public.oc_charts_v2',
+    '  for insert to authenticated with check (user_id = auth.uid());',
+    'create policy "update own charts" on public.oc_charts_v2',
+    '  for update to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid());',
+    '',
+    'grant select, insert, update on public.oc_charts_v2 to authenticated;',
+    '',
+    '-- Saving goes through this so an older write can never clobber a newer one:',
+    '-- a device that was offline for a while comes back and loses politely.',
+    '-- security invoker, so RLS still applies and auth.uid() is the caller.',
+    'create or replace function public.oc_save(',
+    '  p_chart_id text,',
+    '  p_payload jsonb,',
+    '  p_deleted boolean,',
+    '  p_updated_at bigint',
+    ') returns bigint',
+    'language plpgsql',
+    'security invoker',
+    'set search_path = public',
+    'as $$',
+    'declare',
+    '  v_existing bigint;',
+    '  v_uid uuid := auth.uid();',
     'begin',
-    '  if length(p_space) < 16 then raise exception \'sync code too short\'; end if;',
-    '  select c.updated_at into v_existing from public.oc_charts c',
-    '   where c.space = p_space and c.chart_id = p_chart_id;',
+    '  if v_uid is null then',
+    '    raise exception \'not signed in\';',
+    '  end if;',
+    '',
+    '  select c.updated_at into v_existing',
+    '  from public.oc_charts_v2 c',
+    '  where c.user_id = v_uid and c.chart_id = p_chart_id;',
+    '',
     '  if v_existing is not null and v_existing >= p_updated_at then',
     '    return v_existing;',
     '  end if;',
-    '  insert into public.oc_charts (space, chart_id, payload, deleted, updated_at)',
-    '  values (p_space, p_chart_id, p_payload, coalesce(p_deleted,false), p_updated_at)',
-    '  on conflict (space, chart_id) do update',
-    '    set payload = excluded.payload, deleted = excluded.deleted,',
-    '        updated_at = excluded.updated_at;',
-    '  return p_updated_at;',
-    'end; $$;',
     '',
-    'grant execute on function public.oc_pull(text, bigint) to anon, authenticated;',
-    'grant execute on function public.oc_push(text, text, jsonb, boolean, bigint) to anon, authenticated;'
+    '  insert into public.oc_charts_v2 (user_id, chart_id, payload, deleted, updated_at)',
+    '  values (v_uid, p_chart_id, p_payload, coalesce(p_deleted, false), p_updated_at)',
+    '  on conflict (user_id, chart_id) do update',
+    '    set payload = excluded.payload,',
+    '        deleted = excluded.deleted,',
+    '        updated_at = excluded.updated_at;',
+    '',
+    '  return p_updated_at;',
+    'end;',
+    '$$;',
+    '',
+    'grant execute on function public.oc_save(text, jsonb, boolean, bigint) to authenticated;'
   ].join('\n');
 
   var syncBackdrop = $('syncBackdrop'), syncSheet = $('syncSheet');
   function openSyncSheet() {
     $('syncUrl').value = syncCfg.url || '';
     $('syncKey').value = syncCfg.key || '';
-    $('syncCode').value = syncCfg.space || '';
+    $('authEmail').value = syncCfg.email || '';
     $('syncSqlBox').textContent = SYNC_SQL;
     refreshSyncUi();
     syncBackdrop.classList.add('show');
@@ -873,18 +948,19 @@
 
   function agoText(ts) {
     if (!ts) return '';
-    var s = Math.round((Date.now() - ts) / 1000);
-    if (s < 10) return 'just now';
-    if (s < 60) return s + 's ago';
-    if (s < 3600) return Math.round(s / 60) + ' min ago';
-    return Math.round(s / 3600) + ' h ago';
+    var secs = Math.round((Date.now() - ts) / 1000);
+    if (secs < 10) return 'just now';
+    if (secs < 60) return secs + 's ago';
+    if (secs < 3600) return Math.round(secs / 60) + ' min ago';
+    return Math.round(secs / 3600) + ' h ago';
   }
   function refreshSyncUi() {
     var dot = $('syncDot'), text = $('syncStatusText'), detail = $('syncStatusDetail');
     var menuDot = $('menuSyncDot'), menuLabel = $('menuSyncLabel');
-    var cls = 'syncdot', label = 'Not set up', sub = 'Charts stay on this device only.';
-    if (!syncEnabled()) {
-      label = 'Off'; sub = 'Charts stay on this device only.';
+    var cls = 'syncdot', label = 'Off', sub = 'Charts stay on this device only.';
+    if (!signedIn()) {
+      label = hasProject() ? 'Not signed in' : 'Off';
+      sub = hasProject() ? 'Enter your email below to start syncing.' : 'Charts stay on this device only.';
     } else if (syncState.status === 'error') {
       cls += ' error'; label = 'Problem syncing'; sub = syncState.detail || 'Could not reach your project.';
     } else if (syncState.status === 'syncing') {
@@ -896,12 +972,12 @@
     if (text) text.textContent = label;
     if (detail) detail.textContent = sub;
     if (menuDot) menuDot.className = cls;
-    if (menuLabel) menuLabel.textContent = syncEnabled() ? ('Sync — ' + label.toLowerCase()) : 'Sync across devices';
+    if (menuLabel) menuLabel.textContent = signedIn() ? ('Sync — ' + label.toLowerCase()) : 'Sync across devices';
     var chip = $('syncChip');
     if (chip) {
-      chip.className = syncEnabled() ? (syncState.status === 'error' ? 'error' : (syncState.status === 'ok' ? 'ok' : '')) : '';
+      chip.className = signedIn() ? (syncState.status === 'error' ? 'error' : (syncState.status === 'ok' ? 'ok' : '')) : '';
       chip.querySelector('.syncdot').className = cls;
-      var chipLabel = !syncEnabled() ? 'Sync off'
+      var chipLabel = !signedIn() ? 'Sync off'
         : (syncState.status === 'error' ? 'Sync problem' : (syncState.status === 'syncing' ? 'Syncing' : 'Synced'));
       $('syncChipText').textContent = chipLabel;
       // The visible text is CSS-gated to the error state; screen readers and
@@ -909,157 +985,170 @@
       chip.setAttribute('aria-label', chipLabel);
       chip.title = chipLabel;
     }
+    var inEl = $('signedInBlock'), outEl = $('signedOutBlock');
+    if (inEl && outEl) {
+      inEl.style.display = signedIn() ? 'block' : 'none';
+      outEl.style.display = signedIn() ? 'none' : 'block';
+      if (signedIn()) $('authWho').textContent = syncCfg.email;
+    }
   }
   onSyncChange(refreshSyncUi);
-  setInterval(function () { if (syncEnabled()) refreshSyncUi(); }, 15000);
+  setInterval(function () { if (signedIn()) refreshSyncUi(); }, 15000);
 
   $('syncOpenBtn').addEventListener('click', function () { closeMenu(); setTimeout(openSyncSheet, 120); });
   $('syncChip').addEventListener('click', openSyncSheet);
   $('syncCloseBtn').addEventListener('click', closeSyncSheet);
   syncBackdrop.addEventListener('click', function (e) { if (e.target === syncBackdrop) closeSyncSheet(); });
-
-  $('syncGenBtn').addEventListener('click', function () {
-    if (syncCfg.space && !window.confirm('Replace the existing sync code?\n\nThis device will stop sharing charts with any device still using the old code.')) return;
-    $('syncCode').value = newSyncCode();
-    toast('New code generated — use it on every device');
-  });
-  function copyText(str, okMsg) {
+  $('syncSqlCopyBtn').addEventListener('click', function () {
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(str).then(function () { toast(okMsg); }).catch(function () { toast('Could not copy — select it by hand'); });
+      navigator.clipboard.writeText(SYNC_SQL).then(function () { toast('SQL copied — paste it into Supabase'); })
+        .catch(function () { toast('Could not copy — select it by hand'); });
     } else toast('Could not copy — select it by hand');
-  }
-  $('syncCopyBtn').addEventListener('click', function () {
-    var v = $('syncCode').value.trim();
-    if (!v) { toast('No code to copy'); return; }
-    copyText(v, 'Code copied');
   });
-  $('syncSqlCopyBtn').addEventListener('click', function () { copyText(SYNC_SQL, 'SQL copied — paste it into Supabase'); });
 
-  $('syncConnectBtn').addEventListener('click', function () {
+  function saveProjectFields() {
     var url = normalizeUrl($('syncUrl').value);
     var key = $('syncKey').value.trim();
-    var code = normalizeSyncCode($('syncCode').value);
-    if (!/^https?:\/\//.test(url)) { alert('The Project URL should start with https:// — copy it from Supabase → Project Settings → API.'); return; }
-    if (!key) { alert('Paste the anon public key from Supabase → Project Settings → API.'); return; }
-    if (code.replace(/-/g, '').length < 16) { alert('That sync code is too short. Tap "Generate code" to make one, then use the same code on your other device.'); return; }
-    syncCfg.url = url; syncCfg.key = key;
-    // A different code points at different data, so nothing already pushed
-    // under the old one should be assumed to be present under the new one.
-    if (syncCfg.space !== code) { syncCfg.space = code; syncCfg.pushed = {}; syncCfg.lastPull = 0; }
+    if (!/^https?:\/\//.test(url)) { alert('The Project URL should start with https:// — copy it from Supabase → Project Settings → API.'); return false; }
+    if (!key) { alert('Paste the anon public key from Supabase → Project Settings → API.'); return false; }
+    // Pointing at a different project invalidates any session held for the old one.
+    if (syncCfg.url !== url || syncCfg.key !== key) {
+      syncCfg.url = url; syncCfg.key = key;
+      syncCfg.token = ''; syncCfg.refresh = ''; syncCfg.expires = 0; syncCfg.pushed = {};
+    }
     saveSyncCfg();
-    $('syncCode').value = code;
-    startSyncLoop();
-    setSyncStatus('syncing');
-    syncNow({ announce: false, silentToast: true }).then(function () {
-      refreshSyncUi();
-      if (syncState.status === 'error') {
-        alert('Sync could not connect:\n\n' + syncState.detail + '\n\nTap "Test connection" for a step-by-step check.');
-      } else {
-        var n = Object.keys(state.charts).length;
-        alert('Sync is on.\n\nThis device now shares ' + n + ' chart' + (n === 1 ? '' : 's') + ' under this code.\n\nOn your other device, open Sync and enter the SAME code, URL and key. Charts only meet if the code matches exactly.');
-      }
-    });
+    refreshSyncUi();
+    return true;
+  }
+  $('syncSaveProjectBtn').addEventListener('click', function () {
+    if (saveProjectFields()) toast('Project saved — now sign in');
   });
+
+  function emailValue() { return ($('authEmail').value || '').trim().toLowerCase(); }
+  function sendCode() {
+    if (!saveProjectFields()) return;
+    var email = emailValue();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { alert('Enter a valid email address.'); return; }
+    $('authSendBtn').disabled = true;
+    authRequestCode(email)
+      .then(function () {
+        $('authCodeBlock').style.display = 'block';
+        $('authCode').focus();
+        toast('Code sent to ' + email);
+      })
+      .catch(function (err) {
+        alert('Could not send the code:\n\n' + (err.message || err) + '\n\nTap "Test connection" for a step-by-step check.');
+      })
+      .then(function () { $('authSendBtn').disabled = false; });
+  }
+  $('authSendBtn').addEventListener('click', sendCode);
+  $('authResendBtn').addEventListener('click', sendCode);
+
+  $('authVerifyBtn').addEventListener('click', function () {
+    var email = emailValue();
+    var code = ($('authCode').value || '').replace(/\D/g, '');
+    if (code.length < 6) { alert('Enter the 6-digit code from the email.'); return; }
+    $('authVerifyBtn').disabled = true;
+    authVerifyCode(email, code)
+      .then(function () {
+        $('authCodeBlock').style.display = 'none';
+        $('authCode').value = '';
+        refreshSyncUi();
+        startSyncLoop();
+        return syncNow({ silentToast: true });
+      })
+      .then(function () {
+        refreshSyncUi();
+        var n = Object.keys(state.charts).length;
+        alert('Signed in as ' + syncCfg.email + '.\n\nYou have ' + n + ' chart' + (n === 1 ? '' : 's') + ' here, kept in step automatically.\n\nSign in with the same email on your other device and they will meet.');
+      })
+      .catch(function (err) {
+        alert('Sign-in failed:\n\n' + (err.message || err));
+      })
+      .then(function () { $('authVerifyBtn').disabled = false; });
+  });
+
+  $('authSignOutBtn').addEventListener('click', function () {
+    if (!window.confirm('Sign out on this device?\n\nYour charts stay here, and the copies in your account stay where they are.')) return;
+    authSignOut();
+    refreshSyncUi();
+    toast('Signed out');
+  });
+  $('syncNowBtn2').addEventListener('click', function () {
+    if (!signedIn()) { toast('Sign in first'); return; }
+    syncNow({ announce: true });
+  });
+
   // A real round trip that names the failing step. "It isn't syncing" is
-  // almost always one of: not set up here, set up with a different code, or
-  // the SQL never run — and each of those looks identical without this.
+  // almost always one of: project details missing, not signed in on this
+  // device, or the SQL never run — and those look identical without this.
   $('syncTestBtn').addEventListener('click', function () {
     var out = $('syncReport');
     var url = normalizeUrl($('syncUrl').value);
     var key = $('syncKey').value.trim();
-    var code = normalizeSyncCode($('syncCode').value);
     var lines = [];
     function show() { out.style.display = 'block'; out.textContent = lines.join('\n'); }
 
-    lines.push('Checking…'); show();
-    if (!/^https?:\/\//.test(url) || !key || code.replace(/-/g, '').length < 16) {
+    if (!/^https?:\/\//.test(url) || !key) {
       lines = [
         (/^https?:\/\//.test(url) ? 'OK  ' : 'X   ') + 'Project URL',
         (key ? 'OK  ' : 'X   ') + 'Anon key',
-        (code.replace(/-/g, '').length >= 16 ? 'OK  ' : 'X   ') + 'Sync code',
         '',
-        'Fill in whatever is marked X above, then tap Connect & sync.'
+        'Fill in whatever is marked X, then Save project details.'
       ];
       show();
       return;
     }
-    lines = ['OK  Project URL', 'OK  Anon key', 'OK  Sync code (' + code.slice(0, 6) + '…)', '', 'Contacting your project…'];
+    lines = ['OK  Project URL', 'OK  Anon key'];
+    if (!signedIn()) {
+      lines.push('X   Not signed in on this device');
+      lines.push('');
+      lines.push('Enter your email above and tap "Email me a');
+      lines.push('sign-in code". Use the SAME email as your other');
+      lines.push('device — that is what pairs them.');
+      show();
+      return;
+    }
+    lines.push('OK  Signed in as ' + syncCfg.email);
+    lines.push('Reading your charts…');
     show();
 
-    // Test against the values in the boxes, not the saved ones, so the button
-    // is useful before you have ever connected.
-    var saved = { url: syncCfg.url, key: syncCfg.key, space: syncCfg.space };
-    syncCfg.url = url; syncCfg.key = key; syncCfg.space = code;
-    var probeId = '__probe';
-    var stamp = Date.now();
-
-    syncRpc('oc_push', { p_space: code, p_chart_id: probeId, p_payload: { t: stamp }, p_deleted: false, p_updated_at: stamp })
-      .then(function () {
-        lines[lines.length - 1] = 'OK  Wrote a test record';
-        lines.push('Reading it back…'); show();
-        return syncRpc('oc_pull', { p_space: code, p_since: 0 });
-      })
+    remotePull()
       .then(function (rows) {
-        var mine = (rows || []).filter(function (r) { return r.chart_id !== probeId; });
-        var probe = (rows || []).find(function (r) { return r.chart_id === probeId; });
-        lines[lines.length - 1] = probe ? 'OK  Read it back' : 'X   Wrote, but could not read back';
+        var live = (rows || []).filter(function (r) { return !r.deleted; });
+        lines[lines.length - 1] = 'OK  Read your account';
         lines.push('');
-        lines.push('This sync code holds ' + mine.length + ' chart' + (mine.length === 1 ? '' : 's') + '.');
-        if (!mine.length) {
+        lines.push('Your account holds ' + live.length + ' chart' + (live.length === 1 ? '' : 's') + '.');
+        if (!live.length) {
           lines.push('');
-          lines.push('Nothing is stored under this code yet. If your other');
-          lines.push('device has charts, it is either not connected or is');
-          lines.push('using a DIFFERENT code — copy this exact code to it.');
+          lines.push('Nothing uploaded yet. Make an edit and it should');
+          lines.push('appear within a few seconds.');
         } else {
           lines.push('');
-          mine.slice(0, 8).forEach(function (r) {
-            var nm = (r.payload && r.payload.name) || (r.deleted ? '(deleted)' : '(unnamed)');
-            lines.push('  \u2022 ' + nm);
+          live.slice(0, 8).forEach(function (r) {
+            lines.push('  • ' + ((r.payload && r.payload.name) || '(unnamed)'));
           });
           lines.push('');
-          lines.push('If those are missing here, tap Sync now.');
+          lines.push('If any are missing here, tap Sync now.');
         }
         show();
-        // clean the probe up; failure to delete is not worth reporting
-        return syncRpc('oc_push', { p_space: code, p_chart_id: probeId, p_payload: null, p_deleted: true, p_updated_at: stamp + 1 }).catch(function () {});
       })
       .catch(function (err) {
         var msg = (err && err.message) || 'unknown error';
         lines[lines.length - 1] = 'X   ' + msg;
         lines.push('');
-        if (/Setup step missing|Could not find/i.test(msg)) {
-          lines.push('The database functions are not there. Copy the SQL');
-          lines.push('below into your Supabase SQL Editor and press Run,');
-          lines.push('then test again.');
-        } else if (/rejected|API key|JWT/i.test(msg)) {
-          lines.push('The URL or the anon key is wrong. Both come from');
-          lines.push('Supabase > Project Settings > API. Use the "anon');
-          lines.push('public" key, not the service role key.');
+        if (/Setup step missing|Could not find|relation/i.test(msg)) {
+          lines.push('The table is not there. Copy the SQL below into');
+          lines.push('your Supabase SQL Editor and press Run.');
+        } else if (/Signed out|expired|JWT/i.test(msg)) {
+          lines.push('Your session ended. Sign in again above.');
         } else {
-          lines.push('Could not reach the project. Check the URL and that');
-          lines.push('this device is online.');
+          lines.push('Could not reach the project. Check the URL and');
+          lines.push('that this device is online.');
         }
         show();
-      })
-      .then(function () {
-        syncCfg.url = saved.url; syncCfg.key = saved.key; syncCfg.space = saved.space;
       });
   });
-
-  $('syncNowBtn').addEventListener('click', function () {
-    if (!syncEnabled()) { toast('Set up sync first'); return; }
-    syncNow({ announce: true });
-  });
-  $('syncOffBtn').addEventListener('click', function () {
-    if (!window.confirm('Turn sync off on this device?\n\nYour charts stay here, and the copies on your other devices stay where they are.')) return;
-    syncCfg = defaultSyncCfg();
-    saveSyncCfg();
-    clearInterval(syncPollTimer);
-    setSyncStatus('off');
-    $('syncCode').value = ''; $('syncUrl').value = ''; $('syncKey').value = '';
-    toast('Sync turned off');
-  });
-
   function snapshot() { return JSON.stringify(state.charts[state.activeId]); }
   function pushUndo() {
     undoStack.push(snapshot());

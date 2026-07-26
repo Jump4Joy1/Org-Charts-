@@ -1,71 +1,66 @@
--- OrgChart Builder — cloud sync setup
+-- OrgChart Builder — cloud sync setup (email sign-in)
 -- Run this once in your Supabase project's SQL Editor.
 --
--- Security model: the anon key alone gets you nothing. The table itself is
--- not readable or writable by the anon role; the only things exposed are the
--- two functions below, and both demand the sync code. The sync code is the
--- secret that guards your charts, so treat it like a password.
+-- Each row belongs to a signed-in user. Row Level Security ties every read
+-- and write to auth.uid(), so a signed-in person can only ever see their own
+-- charts — the anon key on its own reads nothing at all.
 
-create table if not exists public.oc_charts (
-  space      text   not null,
-  chart_id   text   not null,
+create table if not exists public.oc_charts_v2 (
+  user_id    uuid    not null references auth.users(id) on delete cascade,
+  chart_id   text    not null,
   payload    jsonb,
   deleted    boolean not null default false,
-  updated_at bigint not null,
-  primary key (space, chart_id)
+  updated_at bigint  not null,
+  primary key (user_id, chart_id)
 );
 
-alter table public.oc_charts enable row level security;
+alter table public.oc_charts_v2 enable row level security;
 
--- No direct table access for the anon key — everything goes through the
--- functions, which check the space (sync code) first.
-revoke all on table public.oc_charts from anon, authenticated;
+drop policy if exists "read own charts"   on public.oc_charts_v2;
+drop policy if exists "insert own charts" on public.oc_charts_v2;
+drop policy if exists "update own charts" on public.oc_charts_v2;
 
--- Read every chart belonging to one sync code.
-create or replace function public.oc_pull(p_space text, p_since bigint default 0)
-returns table (chart_id text, payload jsonb, deleted boolean, updated_at bigint)
-language sql
-security definer
-set search_path = public
-as $$
-  select c.chart_id, c.payload, c.deleted, c.updated_at
-  from public.oc_charts c
-  where c.space = p_space
-    and length(p_space) >= 16
-    and c.updated_at > coalesce(p_since, 0);
-$$;
+create policy "read own charts" on public.oc_charts_v2
+  for select to authenticated using (user_id = auth.uid());
+create policy "insert own charts" on public.oc_charts_v2
+  for insert to authenticated with check (user_id = auth.uid());
+create policy "update own charts" on public.oc_charts_v2
+  for update to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid());
 
--- Write one chart. Older writes are ignored, so a stale device that comes
--- back online cannot clobber newer work.
-create or replace function public.oc_push(
-  p_space text,
+grant select, insert, update on public.oc_charts_v2 to authenticated;
+
+-- Saving goes through this so an older write can never clobber a newer one:
+-- a device that was offline for a while comes back and loses politely.
+-- security invoker, so RLS still applies and auth.uid() is the caller.
+create or replace function public.oc_save(
   p_chart_id text,
   p_payload jsonb,
   p_deleted boolean,
   p_updated_at bigint
 ) returns bigint
 language plpgsql
-security definer
+security invoker
 set search_path = public
 as $$
 declare
   v_existing bigint;
+  v_uid uuid := auth.uid();
 begin
-  if length(p_space) < 16 then
-    raise exception 'sync code too short';
+  if v_uid is null then
+    raise exception 'not signed in';
   end if;
 
   select c.updated_at into v_existing
-  from public.oc_charts c
-  where c.space = p_space and c.chart_id = p_chart_id;
+  from public.oc_charts_v2 c
+  where c.user_id = v_uid and c.chart_id = p_chart_id;
 
   if v_existing is not null and v_existing >= p_updated_at then
     return v_existing;
   end if;
 
-  insert into public.oc_charts (space, chart_id, payload, deleted, updated_at)
-  values (p_space, p_chart_id, p_payload, coalesce(p_deleted, false), p_updated_at)
-  on conflict (space, chart_id) do update
+  insert into public.oc_charts_v2 (user_id, chart_id, payload, deleted, updated_at)
+  values (v_uid, p_chart_id, p_payload, coalesce(p_deleted, false), p_updated_at)
+  on conflict (user_id, chart_id) do update
     set payload = excluded.payload,
         deleted = excluded.deleted,
         updated_at = excluded.updated_at;
@@ -74,5 +69,4 @@ begin
 end;
 $$;
 
-grant execute on function public.oc_pull(text, bigint) to anon, authenticated;
-grant execute on function public.oc_push(text, text, jsonb, boolean, bigint) to anon, authenticated;
+grant execute on function public.oc_save(text, jsonb, boolean, bigint) to authenticated;

@@ -1098,45 +1098,57 @@ input[type=file]{display:none;}
     <div id="syncStatusLine"><span class="syncdot" id="syncDot"></span><span id="syncStatusText">Not set up</span></div>
     <div id="syncStatusDetail"></div>
 
-    <h4>Sync code</h4>
-    <p class="smallmuted" style="margin-top:0;">This code is the key to your charts. Use the <b>same code on every device</b>. Anyone who has it can read and change your charts, so don’t post it publicly.</p>
-    <div class="field" style="margin-top:8px;">
-      <input id="syncCode" placeholder="paste your code, or generate one" autocapitalize="off" autocorrect="off" spellcheck="false">
+    <div id="signedOutBlock">
+      <h4>Sign in</h4>
+      <p class="smallmuted" style="margin-top:0;">Use the same email on every device and your charts follow you. No codes to copy.</p>
+      <div class="field"><label>Email</label><input id="authEmail" type="email" placeholder="you@example.com" autocapitalize="off" autocorrect="off" spellcheck="false"></div>
+      <div class="btnrow" style="margin-top:0;">
+        <button class="btn" id="authSendBtn" style="flex:1;">Email me a sign-in code</button>
+      </div>
+      <div id="authCodeBlock" style="display:none;">
+        <div class="field" style="margin-top:12px;"><label>6-digit code from the email</label><input id="authCode" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" maxlength="8"></div>
+        <div class="btnrow" style="margin-top:0;">
+          <button class="btn" id="authVerifyBtn">Sign in</button>
+          <button class="btn secondary" id="authResendBtn">Resend</button>
+        </div>
+      </div>
     </div>
-    <div class="btnrow" style="margin-top:0;">
-      <button class="btn secondary" id="syncGenBtn">Generate code</button>
-      <button class="btn secondary" id="syncCopyBtn">Copy code</button>
+
+    <div id="signedInBlock" style="display:none;">
+      <h4>Signed in</h4>
+      <div class="codebox" id="authWho"></div>
+      <div class="btnrow">
+        <button class="btn secondary" id="syncNowBtn2">Sync now</button>
+        <button class="btn secondary" id="authSignOutBtn">Sign out</button>
+      </div>
     </div>
 
     <h4>Your Supabase project</h4>
+    <p class="smallmuted" style="margin-top:0;">Set once per device, from the same project on both.</p>
     <div class="field"><label>Project URL</label><input id="syncUrl" placeholder="https://abcdefg.supabase.co" autocapitalize="off" autocorrect="off" spellcheck="false"></div>
     <div class="field"><label>Anon public key</label><input id="syncKey" placeholder="eyJhbGciOi…" autocapitalize="off" autocorrect="off" spellcheck="false"></div>
-
     <div class="btnrow">
-      <button class="btn" id="syncConnectBtn">Connect &amp; sync</button>
-      <button class="btn secondary" id="syncNowBtn">Sync now</button>
+      <button class="btn secondary" id="syncSaveProjectBtn" style="flex:1;">Save project details</button>
     </div>
     <div class="btnrow">
       <button class="btn secondary" id="syncTestBtn" style="flex:1;">🩺 Test connection</button>
     </div>
     <div id="syncReport" class="sqlbox" style="display:none;"></div>
-    <div class="btnrow">
-      <button class="btn secondary" id="syncOffBtn" style="flex:1;">Turn sync off on this device</button>
-    </div>
 
     <div class="divider"></div>
     <h4>One-time setup</h4>
     <p class="smallmuted" style="margin-top:0;">Do this once, on either device. It’s free and needs no card.</p>
     <ol class="setupsteps">
-      <li>Go to <code>supabase.com</code>, sign up, and create a new project. Wait for it to finish provisioning.</li>
-      <li>Open <b>SQL Editor</b> in the left sidebar, paste the block below, and hit Run.</li>
-      <li>Open <b>Project Settings → API</b>. Copy the <b>Project URL</b> and the <b>anon public</b> key into the two fields above.</li>
-      <li>Tap <b>Generate code</b>, then <b>Connect &amp; sync</b>.</li>
-      <li>On your other device, open this app, paste the <b>same</b> sync code, URL and key, and tap Connect.</li>
+      <li>Go to <code>supabase.com</code>, sign up, and create a project. Wait for it to finish setting up.</li>
+      <li>Open <b>SQL Editor</b>, paste the block below, press Run.</li>
+      <li>Open <b>Authentication → Email Templates → Magic Link</b> and make sure the message contains <code>{{ .Token }}</code> — that is the 6-digit code the app asks for. Paste this as the body:<br><code>Your OrgChart sign-in code is {{ .Token }}</code></li>
+      <li>Open <b>Project Settings → API</b>, copy the <b>Project URL</b> and the <b>anon public</b> key into the two fields above, then Save project details.</li>
+      <li>Enter your email, tap <b>Email me a sign-in code</b>, and type the code in.</li>
+      <li>On your other device: same URL and key, same email. That’s it.</li>
     </ol>
     <button class="btn secondary" id="syncSqlCopyBtn" style="margin-top:10px;">Copy the SQL</button>
     <div class="sqlbox" id="syncSqlBox"></div>
-    <p class="smallmuted">Your charts are stored in your own Supabase project — not mine, and not on any server I control. Turning sync off here leaves this device’s charts untouched.</p>
+    <p class="smallmuted">Your charts live in your own Supabase project — not mine, and not on any server I control. Only your signed-in account can read them. Signing out leaves this device’s charts untouched.</p>
     <button class="btn ghost" id="syncCloseBtn" style="margin-top:6px;">Close</button>
   </div>
 </div>
