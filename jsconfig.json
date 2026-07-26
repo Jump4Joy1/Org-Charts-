@@ -1,7 +1,11 @@
 {
   "compilerOptions": {
     "target": "ES2017",
-    "lib": ["ES2017", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2017",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "checkJs": true,
     "allowJs": true,
     "noEmit": true,
@@ -10,5 +14,11 @@
     "strict": false,
     "skipLibCheck": true
   },
-  "include": ["design-tokens.js", "schema.js", "command.js", "app.js"]
+  "include": [
+    "globals.d.ts",
+    "design-tokens.js",
+    "schema.js",
+    "command.js",
+    "app.js"
+  ]
 }

@@ -129,7 +129,7 @@
     }
     var list = Object.keys(buckets).map(function (k) {
       var e = buckets[k];
-      return { n: e.n, rgb: [e.r / e.n, e.g / e.n, e.b / e.n] };
+      return { n: e.n, rgb: [e.r / e.n, e.g / e.n, e.b / e.n], score: 0 };
     });
     // Prefer colourful buckets, but weight by how much of the image they are.
     list.forEach(function (e) {
@@ -178,6 +178,11 @@
   // ---------------------------------------------------------------------
   // DOM refs
   // ---------------------------------------------------------------------
+  /**
+   * Element lookup. Typed loosely on purpose: nearly every call site reaches
+   * for .value, .files or .checked, and narrowing each one would be noise.
+   * @type {(id: string) => any}
+   */
   var $ = function (id) { return document.getElementById(id); };
   var stage = $('stage'), canvas = $('canvas'), edgesSvg = $('edges'), emptyEl = $('empty'), hintEl = $('hint');
   var chartNameInput = $('chartName');
@@ -441,6 +446,7 @@
       localStorage.setItem(STORE_KEY, JSON.stringify(state));
       storageWarned = false;
       scheduleSyncPush();
+      if (!quiet) fireWebhook();
       return true;
     } catch (e) {
       // Storage is full (photos are the usual culprit). Keep the in-memory
@@ -848,7 +854,7 @@
         toast('Pulled ' + found.length + ' colours out of that picture');
       };
       img.onerror = function () { toast('That file could not be opened as an image'); };
-      img.src = reader.result;
+      img.src = /** @type {string} */ (reader.result);
     };
     reader.readAsDataURL(file);
   });
@@ -946,6 +952,7 @@
     $('syncKey').value = syncCfg.key || '';
     $('authEmail').value = syncCfg.email || '';
     $('syncSqlBox').textContent = SYNC_SQL;
+    $('webhookUrl').value = prefs.webhook || '';
     refreshSyncUi();
     syncBackdrop.classList.add('show');
     syncSheet.classList.add('show');
@@ -1083,6 +1090,51 @@
   $('syncNowBtn2').addEventListener('click', function () {
     if (!signedIn()) { toast('Sign in first'); return; }
     syncNow({ announce: true });
+  });
+
+  // ---- webhook ---------------------------------------------------------
+  // Fire-and-forget POST of the chart whenever it settles. no-cors keeps a
+  // missing CORS header on the receiving end from filling the console with
+  // errors; the trade-off is that we cannot read the response, which is why
+  // "Send a test" uses a normal request and reports what came back.
+  var webhookTimer = null;
+  function webhookUrl() { return (prefs.webhook || '').trim(); }
+  function fireWebhook() {
+    var url = webhookUrl();
+    if (!url) return;
+    clearTimeout(webhookTimer);
+    webhookTimer = setTimeout(function () {
+      var chart = getActiveChart();
+      try {
+        fetch(url, {
+          method: 'POST', mode: 'no-cors', keepalive: true,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ event: 'chart.updated', at: Date.now(), chart: chart })
+        }).catch(function () {});
+      } catch (e) {}
+    }, 2000);
+  }
+  $('webhookSaveBtn').addEventListener('click', function () {
+    var v = $('webhookUrl').value.trim();
+    if (v && !/^https?:\/\//.test(v)) { alert('The webhook address should start with https://'); return; }
+    prefs.webhook = v;
+    savePrefs();
+    $('webhookStatus').textContent = v ? 'Saved. Changes will be posted here.' : 'Webhook off.';
+    toast(v ? 'Webhook saved' : 'Webhook cleared');
+  });
+  $('webhookTestBtn').addEventListener('click', function () {
+    var v = $('webhookUrl').value.trim();
+    if (!v) { alert('Enter a webhook address first.'); return; }
+    $('webhookStatus').textContent = 'Sending…';
+    fetch(v, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event: 'chart.test', at: Date.now(), chart: getActiveChart() })
+    }).then(function (r) {
+      $('webhookStatus').textContent = 'Replied ' + r.status + ' ' + (r.ok ? '(looks good)' : '(the endpoint refused it)');
+    }).catch(function (e) {
+      $('webhookStatus').textContent = 'Could not reach it: ' + (e.message || e) + '. If the endpoint has no CORS headers this will fail here but still work for real sends.';
+    });
   });
 
   // A real round trip that names the failing step. "It isn't syncing" is
@@ -1954,7 +2006,9 @@
     var w = nodeW(chart.nodes[dragId]);
     var h = (nodeEls[dragId] && nodeEls[dragId].offsetHeight) || NODE_H_APPROX;
     var tol = SNAP_TOL / Math.max(scale, 0.35);   // keep it usable when zoomed out
-    var bestX = null, bestY = null, guides = [];
+    /** @type {{d:number,x:number,line:number}|null} */ var bestX = null;
+    /** @type {{d:number,y:number,line:number}|null} */ var bestY = null;
+    var guides = [];
 
     Object.keys(chart.nodes).forEach(function (oid) {
       if (oid === dragId) return;
@@ -2103,7 +2157,7 @@
       }
       if (targetEl) {
         var preSnap = snapshot();
-        var made = addEdge(sourceId, targetEl.dataset.id, true);
+        var made = addEdge(sourceId, /** @type {any} */ (targetEl).dataset.id, true);
         if (!made) { toast('Already connected'); return; }
         commitUndo(preSnap);
         saveState(); render();
@@ -2686,7 +2740,7 @@
     editSheet.classList.remove('show');
     // Otherwise the name field keeps focus behind the closed sheet and every
     // later keystroke reads as typing.
-    if (document.activeElement && editSheet.contains(document.activeElement)) document.activeElement.blur();
+    if (document.activeElement && editSheet.contains(document.activeElement)) /** @type {any} */ (document.activeElement).blur();
     editingId = null;
     pendingPhoto = null;
   }
@@ -2847,7 +2901,7 @@
         photoPreview.style.background = "center/cover no-repeat url('" + pendingPhoto + "')";
         photoPreview.textContent = '';
       };
-      img.src = reader.result;
+      img.src = /** @type {string} */ (reader.result);
     };
     reader.readAsDataURL(file);
   });
@@ -3947,11 +4001,11 @@
     if (isNaN(then.getTime())) return null;
     var now = new Date();
     now.setHours(0, 0, 0, 0);
-    return Math.round((then - now) / 86400000);
+    return Math.round((then.getTime() - now.getTime()) / 86400000);
   }
   /** The soonest problem across a node's certs, or null when all are fine. */
   function certWarning(n) {
-    var worst = null;
+    /** @type {{days:number,name:string}|null} */ var worst = null;
     (n.certs || []).forEach(function (c) {
       var d = daysUntil(c.expires);
       if (d === null) return;
@@ -4272,10 +4326,12 @@
   // ---- minimal xlsx ---------------------------------------------------
   // A .xlsx is a zip of XML parts. Stored (uncompressed) entries keep the
   // writer to a CRC and a header, which is far less code than a deflate.
+  /** @type {any} */
+  var crc32Memo = {};
   function crc32(bytes) {
-    var c, table = crc32.table;
+    var c, table = crc32Memo.table;
     if (!table) {
-      table = crc32.table = [];
+      table = crc32Memo.table = [];
       for (var n = 0; n < 256; n++) {
         c = n;
         for (var k = 0; k < 8; k++) c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
@@ -4591,7 +4647,7 @@
     var reader = new FileReader();
     reader.onload = function () {
       try {
-        var data = JSON.parse(reader.result);
+        var data = JSON.parse(/** @type {string} */ (reader.result));
         if (!data.nodes) throw new Error('bad file');
         migrateChart(data);
         var id = uid();
@@ -5144,7 +5200,7 @@
     });
     // A field inside a sheet that just closed keeps focus, which would make
     // every later keystroke look like typing and swallow the shortcuts.
-    if (any && document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    if (any && document.activeElement) /** @type {any} */ (document.activeElement).blur();
     return any;
   }
   function typingInField(t) {

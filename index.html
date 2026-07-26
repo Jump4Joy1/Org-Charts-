@@ -1329,6 +1329,16 @@ input[type=file]{display:none;}
     <div id="syncReport" class="sqlbox" style="display:none;"></div>
 
     <div class="divider"></div>
+    <h4>Webhook</h4>
+    <p class="smallmuted" style="margin-top:0;">Optional. Every time a chart changes, the whole chart is POSTed as JSON to this address. No account or OAuth, just a URL.</p>
+    <div class="field"><input id="webhookUrl" placeholder="https://example.com/hook" autocapitalize="off" spellcheck="false"></div>
+    <div class="btnrow" style="margin-top:0;">
+      <button class="btn secondary" id="webhookSaveBtn">Save</button>
+      <button class="btn secondary" id="webhookTestBtn">Send a test</button>
+    </div>
+    <div id="webhookStatus" class="smallmuted"></div>
+
+    <div class="divider"></div>
     <h4>One-time setup</h4>
     <p class="smallmuted" style="margin-top:0;">Do this once, on either device. It’s free and needs no card.</p>
     <ol class="setupsteps">

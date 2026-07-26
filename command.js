@@ -28,6 +28,8 @@
     this.before = null;
     this.after = null;
     this.at = 0;
+    /** @type {Command[]|undefined} Set only on composites. */
+    this.children = undefined;
   }
 
   function CompositeCommand(label, commands) {
