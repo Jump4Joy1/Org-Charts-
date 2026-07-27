@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy Policy — OrgChart Builder</title>
+<meta name="description" content="What OrgChart Builder stores, where it goes, and who can see it.">
+<meta name="theme-color" content="#141a22" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f4f6f8" media="(prefers-color-scheme: light)">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png?v=2">
+<style>
+:root{
+  --bg:#f4f6f8; --panel:#ffffff; --text:#1c2530; --muted:#6b7684; --line:#dbe0e6; --accent:#3568d4;
+}
+@media (prefers-color-scheme: dark){
+  :root{ --bg:#12161c; --panel:#1b2129; --text:#eef1f5; --muted:#93a0b0; --line:#2c3541; --accent:#6d97ea; }
+}
+*{box-sizing:border-box;}
+body{
+  margin:0; background:var(--bg); color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',Segoe UI,Roboto,Arial,sans-serif;
+  line-height:1.55;
+}
+.wrap{max-width:640px; margin:0 auto; padding:40px 20px 80px;}
+h1{font-size:26px; margin:0 0 4px;}
+.updated{color:var(--muted); font-size:13.5px; margin:0 0 32px;}
+h2{font-size:17px; margin:32px 0 8px;}
+p, li{font-size:15px;}
+ul{padding-left:20px; margin:8px 0;}
+a{color:var(--accent);}
+.card{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px 18px; margin:16px 0;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Privacy Policy</h1>
+  <p class="updated">Last updated July 27, 2026</p>
+
+  <p>OrgChart Builder is a tool for building org charts and hierarchies. This
+  page explains what it stores, where that data goes, and who can see it.</p>
+
+  <h2>What's stored, and where</h2>
+  <p>Everything you enter — box names, titles, photos, notes, and (if you use
+  the Pro features) contact details, certifications, and shift schedules —
+  is stored locally on your device. Nothing is sent anywhere unless you turn
+  on sync or a webhook yourself.</p>
+
+  <h2>Sync across devices (optional)</h2>
+  <div class="card">
+    <p>If you turn sync on, your charts are copied to a Supabase project that
+    <strong>you</strong> create and own with your own account, not a server
+    the app's author runs or controls. Signing in uses an emailed one-time
+    code; rows are locked to your account with row-level security, so no one
+    else's key can read them. The author of this app has no access to your
+    Supabase project or the data in it.</p>
+    <p>Sync stores your email address (for sign-in) and your chart content.
+    You can turn sync off at any time, and deleting your Supabase project or
+    its data removes it completely — that's outside this app's control since
+    it's your own infrastructure.</p>
+  </div>
+
+  <h2>Webhook (optional)</h2>
+  <p>If you set a webhook URL, the app sends your chart as JSON to that URL
+  whenever it changes. You control the URL and whatever receives it; the
+  app's author never sees this traffic.</p>
+
+  <h2>What this app does not do</h2>
+  <ul>
+    <li>No analytics, no ad tracking, no third-party SDKs.</li>
+    <li>No account is required to use the app. Sign-in is only needed for
+    sync.</li>
+    <li>No data is sold or shared with advertisers.</li>
+  </ul>
+
+  <h2>Photos and contacts</h2>
+  <p>Box photos come from your device's photo picker; the app never gets
+  broader access to your photo library than the picture you choose. The
+  Call, Text, WhatsApp, and Email quick actions hand off to your phone's own
+  apps (dialer, messages, mail) using the phone number or email you typed
+  into a box — the app does not read your device's contacts.</p>
+
+  <h2>Deleting your data</h2>
+  <p>Deleting a chart in the app removes it from local storage (and from
+  your Supabase project on the next sync, if sync is on). Uninstalling the
+  app, or clearing site data if you're using it in a browser, removes
+  everything stored locally.</p>
+
+  <h2>Children</h2>
+  <p>This app is a workplace and organization planning tool and is not
+  directed at children.</p>
+
+  <h2>Changes to this policy</h2>
+  <p>If this policy changes, the date at the top will be updated.</p>
+
+  <h2>Contact</h2>
+  <p>Questions about this policy: <a href="mailto:jesseandjoytx@gmail.com">jesseandjoytx@gmail.com</a></p>
+</div>
+</body>
+</html>

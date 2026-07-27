@@ -140,6 +140,8 @@ Charts live in the browser's local storage. With sync on they are mirrored to
 your own Supabase project and nowhere else. Colour sets, preferences and the
 Pro licence are per device and never travel inside an exported or synced chart.
 
+Full policy, the version app store listings link to: **[privacy.html](https://jump4joy1.github.io/Org-Charts-/privacy.html)**.
+
 ## Files
 
 | File | Purpose |
