@@ -16,9 +16,11 @@ def lerp(a, b, t):
 
 
 class Canvas:
-    def __init__(self, size):
+    def __init__(self, size, alpha=False):
         self.n = size
-        self.px = [[(255, 255, 255)] * size for _ in range(size)]
+        self.alpha = alpha
+        bg = (255, 255, 255, 0) if alpha else (255, 255, 255)
+        self.px = [[bg] * size for _ in range(size)]
 
     def fill_vgradient(self, top, bot):
         n = self.n
@@ -27,20 +29,40 @@ class Canvas:
             c = (int(lerp(top[0], bot[0], t)),
                  int(lerp(top[1], bot[1], t)),
                  int(lerp(top[2], bot[2], t)))
+            if self.alpha:
+                c = c + (255,)
             self.px[y] = [c] * n
+
+    def fill_solid(self, color):
+        self.fill_vgradient(color, color)
 
     def _blend(self, x, y, color, a=1.0):
         if a <= 0:
             return
         if not (0 <= x < self.n and 0 <= y < self.n):
             return
-        if a >= 1:
-            self.px[y][x] = color
+        if not self.alpha:
+            if a >= 1:
+                self.px[y][x] = color
+                return
+            r, g, b = self.px[y][x]
+            self.px[y][x] = (int(lerp(r, color[0], a)),
+                             int(lerp(g, color[1], a)),
+                             int(lerp(b, color[2], a)))
             return
-        r, g, b = self.px[y][x]
-        self.px[y][x] = (int(lerp(r, color[0], a)),
-                         int(lerp(g, color[1], a)),
-                         int(lerp(b, color[2], a)))
+        # Straight-alpha "over" compositing onto a possibly-transparent dst,
+        # since the foreground glyph has nothing opaque behind it to lerp
+        # against until Android/iOS layer it over the background at runtime.
+        dr, dg, db, da = self.px[y][x]
+        da /= 255.0
+        out_a = a + da * (1 - a)
+        if out_a <= 0:
+            self.px[y][x] = (0, 0, 0, 0)
+            return
+        out_r = (color[0] * a + dr * da * (1 - a)) / out_a
+        out_g = (color[1] * a + dg * da * (1 - a)) / out_a
+        out_b = (color[2] * a + db * da * (1 - a)) / out_a
+        self.px[y][x] = (int(out_r), int(out_g), int(out_b), int(out_a * 255))
 
     def rounded_rect(self, x0, y0, x1, y1, r, color):
         for y in range(int(math.floor(y0)), int(math.ceil(y1)) + 1):
@@ -68,23 +90,41 @@ class Canvas:
                     self._blend(x, y, color)
 
     def downsample(self, factor):
-        out = Canvas(self.n // factor)
+        out = Canvas(self.n // factor, alpha=self.alpha)
         f2 = factor * factor
         for y in range(out.n):
             row = []
             for x in range(out.n):
-                r = g = b = 0
+                r = g = b = a = 0
                 for dy in range(factor):
                     src = self.px[y * factor + dy]
                     for dx in range(factor):
                         c = src[x * factor + dx]
                         r += c[0]; g += c[1]; b += c[2]
-                row.append((r // f2, g // f2, b // f2))
+                        if self.alpha: a += c[3]
+                row.append((r // f2, g // f2, b // f2, a // f2) if self.alpha
+                           else (r // f2, g // f2, b // f2))
             out.px[y] = row
         return out
 
+    def paste(self, src, x, y):
+        for sy in range(src.n):
+            dy = y + sy
+            if not (0 <= dy < self.n):
+                continue
+            for sx in range(src.n):
+                dx = x + sx
+                if not (0 <= dx < self.n):
+                    continue
+                c = src.px[sy][sx]
+                if src.alpha:
+                    self._blend(dx, dy, c[:3], c[3] / 255.0)
+                else:
+                    self._blend(dx, dy, c, 1.0)
+
     def write_png(self, path):
         n = self.n
+        color_type = 6 if self.alpha else 2
         raw = bytearray()
         for y in range(n):
             raw.append(0)
@@ -97,18 +137,30 @@ class Canvas:
                     struct.pack('>I', zlib.crc32(tag + data) & 0xffffffff))
 
         png = (b'\x89PNG\r\n\x1a\n'
-               + chunk(b'IHDR', struct.pack('>IIBBBBB', n, n, 8, 2, 0, 0, 0))
+               + chunk(b'IHDR', struct.pack('>IIBBBBB', n, n, 8, color_type, 0, 0, 0))
                + chunk(b'IDAT', comp)
                + chunk(b'IEND', b''))
         open(path, 'wb').write(png)
 
 
-def draw_icon(size, inset=0.0):
-    """inset: extra padding as a fraction, for maskable variants."""
+BRAND_TOP = (0x4C, 0x84, 0xE8)
+BRAND_BOT = (0x22, 0x46, 0xA8)
+
+
+def draw_icon(size, inset=0.0, mode='full'):
+    """inset: extra padding as a fraction, for maskable/adaptive variants.
+    mode: 'full' draws the brand background and the glyph (what every
+    existing PWA icon is); 'background' draws only the gradient, for
+    Android's adaptive-icon background layer; 'foreground' draws only the
+    white glyph on a transparent canvas, for the adaptive-icon foreground
+    layer, which Android composites over its own background shape.
+    """
     n = size * SS
-    c = Canvas(n)
-    # Brand gradient background, full bleed.
-    c.fill_vgradient((0x4C, 0x84, 0xE8), (0x22, 0x46, 0xA8))
+    c = Canvas(n, alpha=(mode == 'foreground'))
+    if mode != 'foreground':
+        c.fill_vgradient(BRAND_TOP, BRAND_BOT)
+    if mode == 'background':
+        return c.downsample(SS)
 
     U = n / 100.0            # 1 unit == 1% of icon
     # Keep the art clear of iOS's squircle crop / Android's maskable circle.
@@ -146,8 +198,21 @@ def draw_icon(size, inset=0.0):
     return c.downsample(SS)
 
 
+SPLASH_BG = (0x12, 0x16, 0x1c)  # matches capacitor.config.json backgroundColor
+
+
+def draw_splash(canvas_size, logo_size):
+    c = Canvas(canvas_size)
+    c.fill_solid(SPLASH_BG)
+    logo = draw_icon(logo_size, inset=0.0, mode='full')
+    off = (canvas_size - logo_size) // 2
+    c.paste(logo, off, off)
+    return c
+
+
 def main():
-    out = sys.argv[1] if len(sys.argv) > 1 else '.'
+    repo_root = os.path.dirname(os.path.abspath(__file__))
+    out = sys.argv[1] if len(sys.argv) > 1 else os.path.join(repo_root, 'icons')
     os.makedirs(out, exist_ok=True)
     jobs = [
         ('icon-32.png', 32, 0.0),
@@ -162,6 +227,26 @@ def main():
         img = draw_icon(size, inset)
         img.write_png(os.path.join(out, name))
         print('wrote', name, f'{size}x{size}')
+
+    # Source assets for @capacitor/assets (native Android/iOS shells), kept
+    # out of icons/ since that folder is served on the web and copied into
+    # www/ verbatim — these are inputs to a generator, not app assets.
+    # Filenames match @capacitor/assets's "Custom Mode" convention exactly,
+    # so `npx capacitor-assets generate` picks them up with no extra flags.
+    native_out = os.path.join(repo_root, 'assets')
+    os.makedirs(native_out, exist_ok=True)
+    native_jobs = [
+        ('icon-only.png', lambda: draw_icon(1024, 0.0, 'full')),
+        ('icon-foreground.png', lambda: draw_icon(1024, 0.22, 'foreground')),
+        ('icon-background.png', lambda: draw_icon(1024, 0.0, 'background')),
+    ]
+    for name, fn in native_jobs:
+        fn().write_png(os.path.join(native_out, name))
+        print('wrote assets/' + name)
+
+    splash = draw_splash(2732, 820)
+    splash.write_png(os.path.join(native_out, 'splash.png'))
+    print('wrote assets/splash.png')
 
 
 if __name__ == '__main__':

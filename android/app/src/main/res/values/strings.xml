@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">OrgChart Builder</string>
+    <string name="title_activity_main">OrgChart Builder</string>
+    <string name="package_name">com.orgchartbuilder.app</string>
+    <string name="custom_url_scheme">com.orgchartbuilder.app</string>
+</resources>

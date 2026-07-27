@@ -5403,7 +5403,12 @@
   startSyncLoop();
   if (syncEnabled()) syncNow({ silentToast: true });
 
-  if ('serviceWorker' in navigator) {
+  // Inside the native app shells the installed files already are the
+  // current version, so there is nothing for a service worker to gain by
+  // caching them, and a stale cache would be harder to explain than it is
+  // on the web (no "hard refresh" on a phone). window.Capacitor only
+  // exists in the wrapped native build, never in a browser tab.
+  if ('serviceWorker' in navigator && !window.Capacitor) {
     window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () {}); });
   }
 })();

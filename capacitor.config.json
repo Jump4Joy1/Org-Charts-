@@ -1,0 +1,9 @@
+{
+  "appId": "com.orgchartbuilder.app",
+  "appName": "OrgChart Builder",
+  "webDir": "www",
+  "backgroundColor": "#12161c",
+  "android": {
+    "backgroundColor": "#12161c"
+  }
+}
