@@ -535,6 +535,10 @@ svg#guides{position:absolute; left:0; top:0; overflow:visible; pointer-events:no
 /* "No badge" is still worth previewing — shown faded so it's clear the card
    won't display it. */
 #photoPreview.dimmed{opacity:.3;}
+#bgPhotoPreview{
+  width:90px; height:64px; border-radius:10px; background:var(--panel2) center/cover no-repeat;
+  border:1px solid var(--line);
+}
 .photoBtns{display:flex; flex-direction:column; gap:6px; flex:1;}
 .photoBtns .btn{padding:8px 10px; font-size:13px;}
 
@@ -1044,8 +1048,9 @@ input[type=file]{display:none;}
       <button data-v="solid" class="sel">Solid</button>
       <button data-v="gradient">Gradient</button>
       <button data-v="texture">Texture</button>
+      <button data-v="photo">Photo</button>
     </div>
-    <p class="smallmuted" style="margin:10px 0 2px;">Ready-made backgrounds</p>
+    <p class="smallmuted" style="margin:10px 0 2px;" id="bgPresetsLabel">Ready-made backgrounds</p>
     <div class="bggrid" id="bgPresets"></div>
 
     <p class="smallmuted" style="margin:12px 0 2px;" id="bgInkLabel">Colour</p>
@@ -1061,12 +1066,36 @@ input[type=file]{display:none;}
     </div>
     <div id="bgTextureBlock" style="display:none;">
       <div class="texturegrid" id="bgTextureGrid"></div>
+    </div>
+    <div id="bgScaleBlock" style="display:none;">
       <div class="sizerow" id="bgScaleRow">
         <label for="fBgScale">Scale</label>
         <input type="range" id="fBgScale" min="50" max="300" step="10" value="100">
         <span class="val" id="fBgScaleVal">100%</span>
       </div>
     </div>
+    <div id="bgPhotoBlock" style="display:none;">
+      <div class="previewrow">
+        <div class="photoWrap"><div id="bgPhotoPreview"></div></div>
+        <div class="photoBtns">
+          <button class="btn secondary" id="bgChoosePhoto">Choose photo</button>
+          <button class="btn secondary" id="bgRemovePhoto">Remove photo</button>
+        </div>
+      </div>
+      <p class="smallmuted" style="margin:10px 0 2px;">Fit</p>
+      <div class="seg" id="segBgFit">
+        <button data-v="cover" class="sel">Fill</button>
+        <button data-v="repeat">Tile</button>
+      </div>
+      <p class="smallmuted" style="margin:12px 0 2px;">Tint</p>
+      <div class="colors" id="bgTintPicker"></div>
+      <div class="sizerow" id="bgDimRow">
+        <label for="fBgDim">Strength</label>
+        <input type="range" id="fBgDim" min="0" max="80" step="5" value="0">
+        <span class="val" id="fBgDimVal">0%</span>
+      </div>
+    </div>
+    <input type="file" id="bgPhotoFile" accept="image/*" style="display:none;">
 
     <div class="btnrow" style="margin-top:0;">
       <button class="btn secondary" id="titleOpenBtn" style="flex:1;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11.5V5a2 2 0 0 1 2-2h6.5a2 2 0 0 1 1.4.6l8 8a2 2 0 0 1 0 2.8l-6.6 6.6a2 2 0 0 1-2.8 0l-8-8a2 2 0 0 1-.5-1.4Z"/><circle cx="8" cy="8" r="1.3" fill="currentColor" stroke="none"/></svg>Title block &amp; legend</button>

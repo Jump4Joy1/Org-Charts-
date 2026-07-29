@@ -46,7 +46,8 @@ a week of not being opened.
 ## Canvas
 
 - 24 ready-made backgrounds, plus solid, gradient and textured backgrounds you
-  build yourself.
+  build yourself, or your own photo — filled or tiled, with an optional
+  colour tint. Menu · **Chart style** · Background.
 - Department containers group boxes and move them together.
 - Title block and legend, both draggable, both included in exports.
 - Shared trunk connectors, snap-to-grid with alignment guides.
@@ -168,7 +169,7 @@ Then open `http://localhost:8080/`.
 ## Checking types
 
 ```
-npx typescript tsc -p jsconfig.json
+npx tsc -p jsconfig.json
 ```
 
 Plain JavaScript checked through JSDoc and `checkJs`. Currently clean.

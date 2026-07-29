@@ -17,7 +17,7 @@
 
   function defaultFill() { return { type: 'solid', color: '', color2: '', texture: 'dots', angle: 135, scale: 1 }; }
   function defaultBorder() { return { color: '', width: 1, dash: 'solid' }; }
-  function defaultBackground() { return { type: 'solid', color: '', color2: '', texture: 'dots', angle: 135, scale: 1 }; }
+  function defaultBackground() { return { type: 'solid', color: '', color2: '', texture: 'dots', angle: 135, scale: 1, photo: null, photoW: 0, photoH: 0, fit: 'cover', tint: '', dim: 0 }; }
 
   /**
    * v1 -> v2: the tree became a graph. A node's single `parentId` turns into

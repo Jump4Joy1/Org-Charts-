@@ -5,6 +5,8 @@ interface Window {
   OrgChartTokens: any;
   OrgChartSchema: any;
   OrgChartCommands: any;
+  /** Present only inside the Capacitor native app shells, never on the web. */
+  Capacitor?: any;
 }
 interface Error {
   /** HTTP status attached by httpJson so callers can branch on 401. */

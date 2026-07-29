@@ -364,7 +364,7 @@
     { name: 'Mist', a: '#dfe6f2', b: '#f7fafc', angle: 160 }
   ];
   function defaultBorder() { return { color: '', width: 1, dash: 'solid' }; }
-  function defaultBackground() { return { type: 'solid', color: '', color2: '', texture: 'dots', angle: 135, scale: 1 }; }
+  function defaultBackground() { return { type: 'solid', color: '', color2: '', texture: 'dots', angle: 135, scale: 1, photo: null, photoW: 0, photoH: 0, fit: 'cover', tint: '', dim: 0 }; }
   function bgBase(bg) { return bg.color2 || 'var(--bg)'; }
 
   function migrateChart(c) {
@@ -1516,6 +1516,24 @@
     var chart = getActiveChart();
     document.documentElement.style.setProperty('--chart-font', FONT_STACKS[chart.font] || FONT_STACKS.system);
     var bg = chart.background || defaultBackground();
+    if (bg.type === 'photo') {
+      // Assigning the `background` shorthand resets every longhand sub-
+      // property to its initial value first, so switching back from photo
+      // to solid/gradient/texture (which all set the shorthand below)
+      // can't leave a stray background-size/repeat behind.
+      var tint = bgTintCss(bg);
+      var imgLayer = bg.photo ? "url('" + bg.photo + "')" : 'none';
+      var images = tint ? [tint, imgLayer] : [imgLayer];
+      var tileSize = Math.round(260 * texScale(bg.scale)) + 'px';
+      var photoSize = bg.fit === 'repeat' ? tileSize : 'cover';
+      var photoRepeat = bg.fit === 'repeat' ? 'repeat' : 'no-repeat';
+      stage.style.background = 'var(--bg)';
+      stage.style.backgroundImage = images.join(',');
+      stage.style.backgroundSize = (tint ? '100% 100%,' : '') + photoSize;
+      stage.style.backgroundRepeat = (tint ? 'no-repeat,' : '') + photoRepeat;
+      stage.style.backgroundPosition = 'center';
+      return;
+    }
     var css;
     if (bg.type === 'gradient') css = 'linear-gradient(' + fillAngle(bg) + 'deg, ' + (bg.color || 'var(--panel2)') + ', ' + (bg.color2 || 'var(--bg)') + ')';
     else if (bg.type === 'texture') css = textureCss(bg.texture, bg.color || '#6b7684', bgBase(bg), bg.scale);
@@ -3439,6 +3457,9 @@
   var segBgType = $('segBgType'), bgColorPicker = $('bgColorPicker'), bgColor2Picker = $('bgColor2Picker'), bgTextureGrid = $('bgTextureGrid'), chartFontSel = $('chartFont');
 
   var fBgAngle = $('fBgAngle'), fBgScale = $('fBgScale');
+  var segBgFit = $('segBgFit'), bgTintPicker = $('bgTintPicker'), fBgDim = $('fBgDim');
+  var bgPhotoFile = $('bgPhotoFile'), bgPhotoPreview = $('bgPhotoPreview');
+  var pendingBgPhoto = null, pendingBgPhotoW = 0, pendingBgPhotoH = 0;
 
   // Two dozen ready-made canvases. Every one is just a background object, so
   // picking one still leaves each part editable underneath.
@@ -3469,7 +3490,19 @@
   function bgPreviewCss(bg) {
     if (bg.type === 'gradient') return 'linear-gradient(' + fillAngle(bg) + 'deg,' + (bg.color || '#dfe8f5') + ',' + (bg.color2 || '#ffffff') + ')';
     if (bg.type === 'texture') return textureCss(bg.texture, bg.color || '#8a94a6', bg.color2 || '#ffffff', bg.scale);
+    if (bg.type === 'photo') return bg.photo ? "center/cover no-repeat url('" + bg.photo + "')" : 'var(--panel2)';
     return bg.color || 'var(--bg)';
+  }
+  // The dim/tint wash that sits over a photo background, so busy pictures
+  // stay out of the way of the title block and any floating notes. Returns
+  // '' when there is nothing to layer, so callers can skip it cleanly.
+  function bgTintCss(bg) {
+    if (!bg.tint || !bg.dim) return '';
+    var rgb = hexToRgb(bg.tint);
+    if (!rgb) return '';
+    var a = Math.max(0, Math.min(80, bg.dim)) / 100;
+    var rgba = 'rgba(' + rgb.r + ',' + rgb.g + ',' + rgb.b + ',' + a + ')';
+    return 'linear-gradient(' + rgba + ',' + rgba + ')';
   }
   function sameBg(a, b) {
     return a.type === b.type && (a.color || '') === (b.color || '') && (a.color2 || '') === (b.color2 || '')
@@ -3500,13 +3533,21 @@
 
   function updateBgPickerVisibility() {
     var t = segValue(segBgType);
+    var isPhoto = t === 'photo';
+    $('bgPresetsLabel').style.display = isPhoto ? 'none' : 'block';
+    $('bgPresets').style.display = isPhoto ? 'none' : 'grid';
+    $('bgInkLabel').style.display = isPhoto ? 'none' : 'block';
+    $('bgColorPicker').style.display = isPhoto ? 'none' : 'flex';
     $('bgSecondBlock').style.display = (t === 'gradient' || t === 'texture') ? 'block' : 'none';
     $('bgAngleRow').style.display = t === 'gradient' ? 'flex' : 'none';
     $('bgTextureBlock').style.display = t === 'texture' ? 'block' : 'none';
+    $('bgScaleBlock').style.display = (t === 'texture' || (isPhoto && segValue(segBgFit) === 'repeat')) ? 'block' : 'none';
+    $('bgPhotoBlock').style.display = isPhoto ? 'block' : 'none';
     $('bgInkLabel').textContent = t === 'texture' ? 'Pattern colour' : 'Colour';
     $('bgBaseLabel').textContent = t === 'texture' ? 'Behind the pattern' : 'Second colour';
     $('fBgAngleVal').textContent = fBgAngle.value + '\u00b0';
     $('fBgScaleVal').textContent = fBgScale.value + '%';
+    $('fBgDimVal').textContent = fBgDim.value + '%';
   }
   function applyBgLive() {
     var chart = getActiveChart();
@@ -3516,7 +3557,13 @@
       color2: bgColor2Picker.dataset.value,
       texture: bgTextureGrid.dataset.value,
       angle: parseInt(fBgAngle.value, 10),
-      scale: parseInt(fBgScale.value, 10) / 100
+      scale: parseInt(fBgScale.value, 10) / 100,
+      photo: pendingBgPhoto,
+      photoW: pendingBgPhotoW,
+      photoH: pendingBgPhotoH,
+      fit: segValue(segBgFit),
+      tint: bgTintPicker.dataset.value,
+      dim: parseInt(fBgDim.value, 10)
     };
     updateBgPickerVisibility();
     applyChartVars();
@@ -3531,6 +3578,7 @@
   }
   fBgAngle.addEventListener('input', applyBgLive);
   fBgScale.addEventListener('input', applyBgLive);
+  fBgDim.addEventListener('input', applyBgLive);
 
   function onBgTypeChange(newType) {
     if (newType === 'texture' && (bgColorPicker.dataset.value === '#eef1f4' || !bgColorPicker.dataset.value)) {
@@ -3540,6 +3588,49 @@
     updateBgPickerVisibility();
     applyBgLive();
   }
+
+  function updateBgPhotoPreview() {
+    if (pendingBgPhoto) {
+      bgPhotoPreview.style.backgroundImage = "url('" + pendingBgPhoto + "')";
+      bgPhotoPreview.style.backgroundColor = '';
+    } else {
+      bgPhotoPreview.style.backgroundImage = '';
+      bgPhotoPreview.style.backgroundColor = 'var(--panel2)';
+    }
+  }
+  $('bgChoosePhoto').addEventListener('click', function () { bgPhotoFile.value = ''; bgPhotoFile.click(); });
+  $('bgRemovePhoto').addEventListener('click', function () {
+    pendingBgPhoto = null;
+    pendingBgPhotoW = 0; pendingBgPhotoH = 0;
+    updateBgPhotoPreview();
+    applyBgLive();
+  });
+  bgPhotoFile.addEventListener('change', function () {
+    var file = bgPhotoFile.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      var img = new Image();
+      img.onload = function () {
+        // Full picture, not cropped to a square like a box photo \u2014 this is
+        // meant to fill the whole canvas behind the chart. Capped on the
+        // long edge so one background image can't blow out local storage.
+        var maxSide = 1600;
+        var scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+        var w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+        var cnv = document.createElement('canvas');
+        cnv.width = w; cnv.height = h;
+        cnv.getContext('2d').drawImage(img, 0, 0, w, h);
+        pendingBgPhoto = cnv.toDataURL('image/jpeg', 0.82);
+        pendingBgPhotoW = w; pendingBgPhotoH = h;
+        updateBgPhotoPreview();
+        applyBgLive();
+      };
+      img.onerror = function () { toast('That file could not be opened as an image'); };
+      img.src = /** @type {string} */ (reader.result);
+    };
+    reader.readAsDataURL(file);
+  });
 
   function buildThemeGrid() {
     themeGrid.innerHTML = '';
@@ -3575,6 +3666,13 @@
     buildTextureGrid(bgTextureGrid, bg.texture || 'dots', bg.color || '#6b7684', applyBgLive);
     fBgAngle.value = String(fillAngle(bg));
     fBgScale.value = String(Math.round(texScale(bg.scale) * 100));
+    pendingBgPhoto = bg.photo || null;
+    pendingBgPhotoW = bg.photoW || 0;
+    pendingBgPhotoH = bg.photoH || 0;
+    updateBgPhotoPreview();
+    wireSeg(segBgFit, bg.fit || 'cover', applyBgLive);
+    buildColorRow(bgTintPicker, bg.tint || '', applyBgLive, true);
+    fBgDim.value = String(bg.dim || 0);
     buildBgPresets();
     updateBgPickerVisibility();
     wireSeg($('segTrunk'), chart.trunk === false ? 'separate' : 'trunk', function (v) {
@@ -4802,6 +4900,25 @@
       defs.push(svgPatternDef(pid, bg.texture, bg.color || mutedColor, bgBaseX, bg.scale));
       parts.push('<rect x="0" y="0" width="' + W + '" height="' + H + '" fill="' + bgBaseX + '"/>');
       parts.push('<rect x="0" y="0" width="' + W + '" height="' + H + '" fill="url(#' + pid + ')"/>');
+    } else if (bg.type === 'photo' && bg.photo) {
+      var pw = bg.photoW || W, ph = bg.photoH || H;
+      if (bg.fit === 'repeat') {
+        var tile = Math.round(260 * texScale(bg.scale));
+        defs.push('<pattern id="bgphoto" width="' + tile + '" height="' + tile + '" patternUnits="userSpaceOnUse">'
+          + '<image href="' + bg.photo + '" x="0" y="0" width="' + tile + '" height="' + tile + '" preserveAspectRatio="xMidYMid slice"/></pattern>');
+        parts.push('<rect x="0" y="0" width="' + W + '" height="' + H + '" fill="url(#bgphoto)"/>');
+      } else {
+        // Matches CSS background-size:cover — scale to the larger ratio so
+        // the photo fills the page with no letterboxing, then centre it.
+        var coverScale = Math.max(W / pw, H / ph);
+        var dw = pw * coverScale, dh = ph * coverScale;
+        defs.push('<clipPath id="bgphotoclip"><rect x="0" y="0" width="' + W + '" height="' + H + '"/></clipPath>');
+        parts.push('<image href="' + bg.photo + '" x="' + ((W - dw) / 2) + '" y="' + ((H - dh) / 2) + '" width="' + dw + '" height="' + dh + '" clip-path="url(#bgphotoclip)"/>');
+      }
+      if (bg.tint && bg.dim) {
+        var tintRgb = hexToRgb(bg.tint);
+        if (tintRgb) parts.push('<rect x="0" y="0" width="' + W + '" height="' + H + '" fill="rgb(' + tintRgb.r + ',' + tintRgb.g + ',' + tintRgb.b + ')" opacity="' + (Math.max(0, Math.min(80, bg.dim)) / 100) + '"/>');
+      }
     } else {
       parts.push('<rect x="0" y="0" width="' + W + '" height="' + H + '" fill="' + (bg.color || pageBg) + '"/>');
     }
