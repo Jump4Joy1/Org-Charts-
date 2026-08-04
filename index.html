@@ -425,6 +425,24 @@ svg#guides{position:absolute; left:0; top:0; overflow:visible; pointer-events:no
 .btn.ghost{background:none; color:var(--accent); flex:0 0 auto;}
 .btn svg{vertical-align:-3px; margin-right:7px;}
 
+/* Provider sign-in buttons keep each brand's own fixed colours rather than
+   the app's theme variables — that's the point of a recognisable branded
+   button, and it's why they get their own class instead of .btn.secondary. */
+.oauthstack{display:flex; flex-direction:column; gap:10px;}
+.oauthbtn{
+  display:flex; align-items:center; justify-content:center; gap:10px; width:100%;
+  padding:12px 14px; border-radius:12px; font-size:15px; font-weight:600;
+  cursor:pointer; border:1px solid transparent;
+}
+.oauthbtn svg{flex:0 0 auto;}
+.oauthbtn-google{background:#fff; color:#3c4043; border-color:#dadce0;}
+.oauthbtn-google:active{background:#f6f7f8;}
+.oauthbtn-apple{background:#000; color:#fff;}
+.oauthbtn-apple:active{background:#1c1c1e;}
+.oauthbtn-facebook{background:#1877f2; color:#fff;}
+.oauthbtn-facebook:active{background:#1465d1;}
+.oauthbtn:disabled{opacity:.5;}
+
 .seg{display:flex; gap:6px; background:var(--panel2); padding:4px; border-radius:12px; flex-wrap:wrap;}
 .seg button{
   flex:1; padding:9px 6px; border:none; border-radius:9px; background:none; color:var(--muted); min-width:60px;
@@ -1353,12 +1371,21 @@ input[type=file]{display:none;}
       <h4>Sign in</h4>
       <p class="smallmuted" style="margin-top:0;">Sign in the same way on every device and your charts follow you.</p>
       <div class="sizehint" id="authNeedsProject" style="display:none;margin-top:0;">Fill in the Project URL and key above first. Sign-in goes through your own Supabase project.</div>
-      <div class="btnrow" style="margin-top:0;">
-        <button class="btn secondary" id="authGoogleBtn" style="flex:1;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 2"/></svg>Google</button>
-        <button class="btn secondary" id="authAppleBtn" style="flex:1;"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M16.4 12.3c0-2.3 1.9-3.4 2-3.5-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.1-2.8.8-3.5.8-.7 0-1.8-.8-3-.8-1.5 0-3 .9-3.8 2.3-1.6 2.8-.4 7 1.2 9.3.8 1.1 1.7 2.4 3 2.3 1.2 0 1.6-.8 3-.8s1.8.8 3 .8c1.3 0 2.1-1.1 2.8-2.3.9-1.3 1.3-2.5 1.3-2.6-.1 0-2.6-1-2.6-3.7Z"/><path d="M13.9 5.3c.6-.7 1-1.7.9-2.7-.9 0-1.9.6-2.5 1.3-.6.6-1.1 1.6-.9 2.6 1 .1 2-.5 2.5-1.2Z"/></svg>Apple</button>
-        <button class="btn secondary" id="authFacebookBtn" style="flex:1;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15.5 8.5h-2a1 1 0 0 0-1 1V12h3l-.4 3h-2.6v7h-3v-7H8v-3h2.5v-1.9c0-2.3 1.3-3.9 3.8-3.9h1.7v3.3Z"/></svg>Facebook</button>
+      <div class="oauthstack">
+        <button class="oauthbtn oauthbtn-google" id="authGoogleBtn">
+          <svg width="18" height="18" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332C2.438 15.983 5.482 18 9 18z"/><path fill="#FBBC05" d="M3.964 10.71c-.18-.54-.282-1.117-.282-1.71s.102-1.17.282-1.71V4.958H.957C.347 6.173 0 7.548 0 9s.348 2.827.957 4.042l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0 5.482 0 2.438 2.017.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/></svg>
+          <span>Continue with Google</span>
+        </button>
+        <button class="oauthbtn oauthbtn-apple" id="authAppleBtn">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="#fff" stroke="none"><path d="M16.4 12.3c0-2.3 1.9-3.4 2-3.5-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.1-2.8.8-3.5.8-.7 0-1.8-.8-3-.8-1.5 0-3 .9-3.8 2.3-1.6 2.8-.4 7 1.2 9.3.8 1.1 1.7 2.4 3 2.3 1.2 0 1.6-.8 3-.8s1.8.8 3 .8c1.3 0 2.1-1.1 2.8-2.3.9-1.3 1.3-2.5 1.3-2.6-.1 0-2.6-1-2.6-3.7Z"/><path d="M13.9 5.3c.6-.7 1-1.7.9-2.7-.9 0-1.9.6-2.5 1.3-.6.6-1.1 1.6-.9 2.6 1 .1 2-.5 2.5-1.2Z"/></svg>
+          <span>Sign in with Apple</span>
+        </button>
+        <button class="oauthbtn oauthbtn-facebook" id="authFacebookBtn">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="#fff" stroke="none"><path d="M15.1 8.5h-1.6c-.5 0-1 .3-1 1V12h2.6l-.4 3H12.5v7H9.7v-7H7.6V12h2.1v-1.9c0-2.2 1.4-3.9 3.7-3.9h1.7v3.3Z"/></svg>
+          <span>Continue with Facebook</span>
+        </button>
       </div>
-      <p class="smallmuted" style="text-align:center;margin:12px 0;">or</p>
+      <p class="smallmuted" style="text-align:center;margin:14px 0;">or</p>
       <p class="smallmuted" style="margin-top:0;">Email works everywhere, no account needed. No codes to copy.</p>
       <div class="field"><label>Email</label><input id="authEmail" type="email" placeholder="you@example.com" autocapitalize="off" autocorrect="off" spellcheck="false"></div>
       <div class="btnrow" style="margin-top:0;">
