@@ -612,6 +612,88 @@
     clearInterval(syncPollTimer);
     setSyncStatus('off');
   }
+
+  // ---- Google / Apple / Facebook sign-in --------------------------------
+  // Supabase's /authorize endpoint drives the whole OAuth exchange itself —
+  // the app only sends the browser there and reads the tokens back off the
+  // redirect, the same shape of hand-off the email magic link already uses.
+  // On the web that redirect is the page itself. Inside the native shells a
+  // WebView can't complete a Google sign-in at all (Google blocks embedded
+  // browsers), so it opens the system browser via Capacitor and comes back
+  // through this app's own URL scheme instead of an https redirect_to.
+  var OAUTH_CALLBACK_PATH = 'auth-callback';
+  function oauthRedirectTarget() {
+    if (window.Capacitor) return 'com.orgchartbuilder.app://' + OAUTH_CALLBACK_PATH;
+    return location.origin + location.pathname;
+  }
+  function startOAuth(provider) {
+    if (!saveProjectFields()) return;
+    var url = normalizeUrl(syncCfg.url) + '/auth/v1/authorize?provider=' + encodeURIComponent(provider)
+      + '&redirect_to=' + encodeURIComponent(oauthRedirectTarget());
+    var cap = window.Capacitor && window.Capacitor.Plugins;
+    if (cap && cap.Browser) cap.Browser.open({ url: url });
+    else location.href = url;
+  }
+  function parseFragmentParams(frag) {
+    var params = {};
+    String(frag || '').replace(/^[#?]/, '').split('&').forEach(function (kv) {
+      if (!kv) return;
+      var i = kv.indexOf('=');
+      var k = i > -1 ? kv.slice(0, i) : kv;
+      var v = i > -1 ? kv.slice(i + 1) : '';
+      try { params[k] = decodeURIComponent(v); } catch (e) { params[k] = v; }
+    });
+    return params;
+  }
+  /** Stores the session from an OAuth redirect, then best-effort fills in
+   *  the email for display — the tokens alone are enough to sync. */
+  function applyOAuthSession(params) {
+    syncCfg.token = params.access_token;
+    syncCfg.refresh = params.refresh_token || '';
+    syncCfg.expires = Date.now() + ((parseInt(params.expires_in, 10) || 3600) * 1000);
+    syncCfg.pushed = {};
+    saveSyncCfg();
+    return httpJson('/auth/v1/user', { method: 'GET', bearer: params.access_token })
+      .then(function (u) { syncCfg.email = (u && u.email) || 'your account'; saveSyncCfg(); })
+      .catch(function () { syncCfg.email = syncCfg.email || 'your account'; saveSyncCfg(); });
+  }
+  function finishOAuthSignIn(params) {
+    if (params.error) { toast('Sign-in was not completed'); return; }
+    if (!params.access_token) return;
+    applyOAuthSession(params)
+      .then(function () {
+        refreshSyncUi();
+        startSyncLoop();
+        return syncNow({ silentToast: true });
+      })
+      .then(function () {
+        refreshSyncUi();
+        toast('Signed in as ' + syncCfg.email);
+      });
+  }
+  // Web: the redirect lands back on this same page with the tokens in the
+  // URL fragment. Strip it either way so a reload can't replay it.
+  function consumeOAuthRedirect() {
+    if (!/[#&]access_token=|^#error=|&error=/.test(location.hash || '')) return;
+    var params = parseFragmentParams(location.hash);
+    history.replaceState(null, '', location.pathname + location.search);
+    finishOAuthSignIn(params);
+  }
+  // Native: the system browser hands back to com.orgchartbuilder.app://…
+  // instead of navigating this page, so Capacitor's App plugin is what
+  // delivers it.
+  function wireNativeOAuthListener() {
+    var cap = window.Capacitor && window.Capacitor.Plugins;
+    if (!cap || !cap.App) return;
+    cap.App.addListener('appUrlOpen', function (data) {
+      var url = (data && data.url) || '';
+      if (url.indexOf(OAUTH_CALLBACK_PATH) === -1) return;
+      if (cap.Browser) cap.Browser.close().catch(function () {});
+      var split = url.indexOf('#') > -1 ? url.indexOf('#') : url.indexOf('?');
+      finishOAuthSignIn(parseFragmentParams(split > -1 ? url.slice(split) : ''));
+    });
+  }
+
   // Renew a minute before expiry rather than discovering it mid-sync.
   function withSession(fn) {
     if (!signedIn()) return Promise.reject(new Error('Not signed in'));
@@ -1043,6 +1125,9 @@
       if (needs) needs.style.display = ready ? 'none' : 'block';
       var btn = $('authSendBtn');
       if (btn) btn.disabled = !ready;
+      ['authGoogleBtn', 'authAppleBtn', 'authFacebookBtn'].forEach(function (id) {
+        var b = $(id); if (b) b.disabled = !ready;
+      });
     }
   }
   onSyncChange(refreshSyncUi);
@@ -1125,6 +1210,9 @@
   }
   $('authSendBtn').addEventListener('click', sendCode);
   $('authResendBtn').addEventListener('click', sendCode);
+  $('authGoogleBtn').addEventListener('click', function () { startOAuth('google'); });
+  $('authAppleBtn').addEventListener('click', function () { startOAuth('apple'); });
+  $('authFacebookBtn').addEventListener('click', function () { startOAuth('facebook'); });
 
   $('authVerifyBtn').addEventListener('click', function () {
     var email = emailValue();
@@ -5508,6 +5596,8 @@
   ensureBootstrapChart();
   applyTokens();
   consumeSharedLink();
+  consumeOAuthRedirect();
+  wireNativeOAuthListener();
   // Quiet: merely launching the app must not make this device's charts look
   // newer than an edit waiting on the server.
   saveState(true);

@@ -79,8 +79,11 @@ with thicker hairlines. The app honours the system reduced-motion setting.
 
 ## Sync across devices
 
-Sign in with your email on each device and your charts follow you. There is no
-code to copy.
+Sign in the same way on each device — Google, Apple, Facebook, or just an
+email — and your charts follow you automatically. There's no "sync" button to
+press: once you're signed in, pushes go out about a second after you stop
+editing, and pulls run at launch, on focus, on reconnect, and every 20 seconds
+while the app is open. Conflicts are last-write-wins per chart.
 
 Sync uses a Supabase project that **you** own, so your charts are never on a
 server the author controls. One-time setup, free, no card:
@@ -91,20 +94,35 @@ server the author controls. One-time setup, free, no card:
    remaining pages appear once the URL is in.
 3. SQL Editor: paste the block from `supabase-setup.sql` (the app has a copy
    button), Run.
-4. Enter your email, tap the button, and paste back whatever the email gives
-   you. A 6-digit code and the stock sign-in link both work.
-5. Same URL, key and email on the other device.
+4. Authentication · Providers: turn on whichever of Google, Apple, or Facebook
+   you want, following Supabase's instructions for that provider — each needs
+   its own app registration in that provider's developer console (Google
+   Cloud Console, Apple Developer, Meta for Developers), which only you can
+   create. Add the Redirect URLs from the table below under
+   Authentication · URL Configuration.
+5. In the app: tap Google, Apple, or Facebook, or enter your email and tap
+   **Email me a sign-in code** (a 6-digit code and the stock sign-in link both
+   work, no template editing needed).
+6. Same URL, same key, same sign-in method on the other device.
 
-Editing the email template is optional. The app parses the token out of the
-stock magic link, so there is no need to go and add `{{ .Token }}`.
+| Platform | Redirect URL to add in Supabase |
+| --- | --- |
+| Web (this site) | `https://jump4joy1.github.io/Org-Charts-/` |
+| iPhone / Android app | `com.orgchartbuilder.app://auth-callback` |
 
 Rows are tied to your account with row-level security, so the anon key alone
-reads nothing. Pushes go out about a second after you stop editing; pulls run
-at launch, on focus, on reconnect, and every 20 seconds while the app is open.
-Conflicts are last-write-wins per chart.
+reads nothing.
 
 **Test connection** in the sync sheet does a real round trip and names whatever
 is wrong.
+
+Google and Facebook require the redirect to open in the system browser rather
+than the app's own window, since both providers block sign-in from inside an
+embedded WebView — that's already wired up for the iPhone and Android app
+shells. The Google/Apple/Facebook buttons in this repo use plain, unbranded
+icons; swap in each provider's official button assets before an App Store or
+Play Store submission — Apple in particular reviews "Sign in with Apple"
+against its Human Interface Guidelines button spec.
 
 ## Webhook
 

@@ -18,6 +18,15 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Google/Apple/Facebook sign-in opens the system browser (a
+                 WebView can't complete an OAuth login), which hands back to
+                 this scheme instead of an https redirect_to. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="com.orgchartbuilder.app" android:host="auth-callback" />
+            </intent-filter>
         </activity>
 
         <provider
