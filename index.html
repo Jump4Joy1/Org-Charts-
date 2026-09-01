@@ -525,6 +525,17 @@ svg#guides{position:absolute; left:0; top:0; overflow:visible; pointer-events:no
 }
 .node .detailflag.show{display:flex;}
 .node .detailflag svg{width:8px; height:8px;}
+.node .collapsebtn{
+  position:absolute; left:50%; bottom:-9px; transform:translateX(-50%);
+  display:none; align-items:center; justify-content:center; gap:2px;
+  min-width:19px; height:19px; padding:0 5px; border-radius:10px;
+  background:var(--accent); color:#fff; border:2px solid var(--panel);
+  font:inherit; z-index:8; cursor:pointer;
+}
+.node .collapsebtn.show{display:flex;}
+.node .collapsebtn::before{content:'\2212'; font-size:13px; font-weight:800; line-height:1;}
+.node .collapsebtn.collapsed::before{content:'+';}
+.node .collapsebtn .ccount{font-size:10px; font-weight:700; line-height:1;}
 
 /* Quick actions from a long press */
 .quickgrid{display:grid; grid-template-columns:repeat(2,1fr); gap:10px; margin-top:4px;}
@@ -1053,6 +1064,10 @@ input[type=file]{display:none;}
     <div class="btnrow">
       <button class="btn" id="newChartBtn">+ New chart</button>
       <button class="btn secondary" id="relayoutBtn">Tidy layout</button>
+    </div>
+    <div class="btnrow">
+      <button class="btn secondary" id="expandAllBtn">Expand all</button>
+      <button class="btn secondary" id="collapseAllBtn">Collapse all</button>
     </div>
     <div class="divider"></div>
     <div class="btnrow">

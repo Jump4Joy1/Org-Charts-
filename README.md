@@ -48,6 +48,21 @@ a week of not being opened.
   when either is filled in. Details travel with the chart everywhere; personal
   notes stay out of Share a link and only ever leave via your own Export JSON.
 
+## Large trees
+
+- Any box with children shows a small **− / +** toggle at its bottom edge.
+  Tap it to fold the whole branch behind that box, folder-style — the box
+  stays, everything under it (and the lines to it) is hidden, and a badge
+  shows how many boxes are tucked away. Tap **+** to unfold.
+- **Expand all / Collapse all** (menu · Your charts) fold or unfold the whole
+  chart in one tap.
+- **Search** auto-unfolds whatever it needs to so the result you tap is
+  actually on screen.
+- Collapsing is a view setting only — it never removes anything. CSV/Excel,
+  PNG/JPG/SVG, PDF/Print and Share a link always include the full tree
+  regardless of what's folded on screen, so a compact working view and a
+  complete printed handout are never in tension.
+
 ## Canvas
 
 - 24 ready-made backgrounds, plus solid, gradient and textured backgrounds you

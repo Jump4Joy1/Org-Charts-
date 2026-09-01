@@ -398,6 +398,7 @@
       if (n.detail === undefined) n.detail = '';
       if (n.description === undefined) n.description = '';
       if (n.privateNote === undefined) n.privateNote = '';
+      if (n.collapsed === undefined) n.collapsed = false;
       if (!n.avatarMode) n.avatarMode = 'auto';
       if (!n.layout) n.layout = 'stack';
       if (!n.align) n.align = (n.layout === 'row') ? 'left' : 'center';
@@ -1737,6 +1738,95 @@
       + '</g>';
   }
 
+  // ---------------------------------------------------------------------
+  // Collapse / expand: large charts stay readable by folding a subtree
+  // behind its parent box, the way a folder hides the files inside it.
+  // Collapse state lives on the node (chart.nodes[id].collapsed) so it
+  // persists and syncs, but it is purely a rendering concern — exports and
+  // data formats (CSV, share links, JSON) always walk the full chart, so
+  // printing or handing off a chart never silently drops anything.
+  // ---------------------------------------------------------------------
+  function childrenMap(chart) {
+    var map = {};
+    Object.keys(chart.edges).forEach(function (eid) {
+      var e = chart.edges[eid];
+      (map[e.from] = map[e.from] || []).push(e.to);
+    });
+    return map;
+  }
+  /** Node ids reachable from a root through zero or more *expanded*
+   *  ancestors. A node with several parents is visible if ANY path in
+   *  reaches it, which is what lets Land-Kings-style dual-ownership edges
+   *  behave sensibly under collapse. */
+  function computeVisibleNodeIds(chart) {
+    var kids = childrenMap(chart);
+    var hasParent = {};
+    Object.keys(chart.edges).forEach(function (eid) { hasParent[chart.edges[eid].to] = true; });
+    var visible = {};
+    var queue = [];
+    Object.keys(chart.nodes).forEach(function (id) {
+      if (!hasParent[id]) { visible[id] = true; queue.push(id); }
+    });
+    while (queue.length) {
+      var id = queue.shift();
+      var n = chart.nodes[id];
+      if (n && n.collapsed) continue; // don't reveal what's behind a folded box
+      (kids[id] || []).forEach(function (cid) {
+        if (!visible[cid]) { visible[cid] = true; queue.push(cid); }
+      });
+    }
+    return visible;
+  }
+  /** Every descendant of id, regardless of current collapse state — used
+   *  for the "N hidden" count and for expand-all-below-here. */
+  function descendantIds(chart, id) {
+    var kids = childrenMap(chart);
+    var out = [], queue = (kids[id] || []).slice();
+    while (queue.length) {
+      var cid = queue.shift();
+      if (out.indexOf(cid) !== -1) continue;
+      out.push(cid);
+      (kids[cid] || []).forEach(function (gc) { queue.push(gc); });
+    }
+    return out;
+  }
+  /** Ids of every ancestor of id (all parents, grandparents, ...). Used to
+   *  reveal a search result that is currently folded away. */
+  function ancestorIds(chart, id) {
+    var parentsOf = {};
+    Object.keys(chart.edges).forEach(function (eid) {
+      var e = chart.edges[eid];
+      (parentsOf[e.to] = parentsOf[e.to] || []).push(e.from);
+    });
+    var out = [], queue = (parentsOf[id] || []).slice();
+    while (queue.length) {
+      var pid = queue.shift();
+      if (out.indexOf(pid) !== -1) continue;
+      out.push(pid);
+      (parentsOf[pid] || []).forEach(function (gp) { queue.push(gp); });
+    }
+    return out;
+  }
+  function expandAncestors(chart, id) {
+    var changed = false;
+    ancestorIds(chart, id).forEach(function (aid) {
+      var n = chart.nodes[aid];
+      if (n && n.collapsed) { n.collapsed = false; changed = true; }
+    });
+    return changed;
+  }
+  // A note tethered to a node (or edge) that's currently folded away hides
+  // with it, rather than floating on screen with nothing to point at.
+  function noteIsVisible(chart, note, visible) {
+    if (!note.attach) return true;
+    if (note.attach.type === 'node') return !!visible[note.attach.id];
+    if (note.attach.type === 'edge') {
+      var e = chart.edges[note.attach.id];
+      return !!(e && visible[e.from] && visible[e.to]);
+    }
+    return true;
+  }
+
   var cssVarCache = {};
   function cssVar(name) {
     if (cssVarCache[name] === undefined || cssVarCache._theme !== document.documentElement.dataset.theme) {
@@ -1759,6 +1849,9 @@
     Object.keys(nodeEls).forEach(function (id) { if (!chart.nodes[id]) { nodeEls[id].remove(); delete nodeEls[id]; } });
     Object.keys(noteEls).forEach(function (id) { if (!chart.notes[id]) { noteEls[id].remove(); delete noteEls[id]; } });
 
+    var kids = childrenMap(chart);
+    var visible = computeVisibleNodeIds(chart);
+
     nodeIds.forEach(function (id) {
       var n = chart.nodes[id];
       var el = nodeEls[id];
@@ -1774,11 +1867,13 @@
           '<div class="handle e" data-dir="e"></div><div class="handle w" data-dir="w"></div>' +
           '<div class="szgrip"></div>' +
           '<div class="statusdot"></div><div class="certflag"></div>' +
-          '<div class="detailflag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M5 5h14M5 12h14M5 19h9"/></svg></div>';
+          '<div class="detailflag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M5 5h14M5 12h14M5 19h9"/></svg></div>' +
+          '<button type="button" class="collapsebtn"><span class="ccount"></span></button>';
         canvas.appendChild(el);
         nodeEls[id] = el;
         wireNodeEvents(el);
       }
+      el.style.display = visible[id] ? '' : 'none';
       el.style.left = n.x + 'px';
       el.style.top = n.y + 'px';
       var color = n.color || COLOR_SWATCHES[0];
@@ -1793,6 +1888,12 @@
       dt.textContent = n.detail || '';
       dt.style.display = n.detail ? 'block' : 'none';
       el.querySelector('.detailflag').classList.toggle('show', !!(n.description || n.privateNote));
+      var hasKids = !!(kids[id] && kids[id].length);
+      var cbtn = el.querySelector('.collapsebtn');
+      cbtn.classList.toggle('show', hasKids);
+      cbtn.classList.toggle('collapsed', !!n.collapsed);
+      cbtn.setAttribute('aria-label', n.collapsed ? 'Expand' : 'Collapse');
+      cbtn.querySelector('.ccount').textContent = (hasKids && n.collapsed) ? String(descendantIds(chart, id).length) : '';
       applyNodeStyle(el, n);
     });
 
@@ -1809,6 +1910,7 @@
       }
       el.textContent = note.text || '';
       el.style.background = note.color || '#ffe58a';
+      el.style.display = noteIsVisible(chart, note, visible) ? '' : 'none';
       var pos = noteAnchor(note);
       el.style.left = pos.x + 'px';
       el.style.top = pos.y + 'px';
@@ -2013,9 +2115,17 @@
     var chart = getActiveChart();
     var parts = [], defs = [];
     var heightOf = function (id) { return (nodeEls[id] && nodeEls[id].offsetHeight) || NODE_H_APPROX; };
-    var trunkPaths = computeTrunkPaths(chart, heightOf);
+    // Folded-away nodes take their edges with them, so a trunk line never
+    // reaches into empty space where a collapsed subtree used to be.
+    var visible = computeVisibleNodeIds(chart);
+    var visibleEdges = {};
     Object.keys(chart.edges).forEach(function (id) {
       var e = chart.edges[id];
+      if (visible[e.from] && visible[e.to]) visibleEdges[id] = e;
+    });
+    var trunkPaths = computeTrunkPaths({ edges: visibleEdges, nodes: chart.nodes, trunk: chart.trunk }, heightOf);
+    Object.keys(visibleEdges).forEach(function (id) {
+      var e = visibleEdges[id];
       var a = chart.nodes[e.from], b = chart.nodes[e.to];
       if (!a || !b) return;
       var aEl = nodeEls[e.from], bEl = nodeEls[e.to];
@@ -2045,6 +2155,7 @@
     // Faint leader lines tethering each attached note to its box / connector,
     // so it stays obvious what a note is annotating once it's been moved.
     Object.keys(chart.notes).forEach(function (nid) {
+      if (!noteIsVisible(chart, chart.notes[nid], visible)) return;
       var tether = noteTether(nid);
       if (!tether) return;
       parts.push('<line class="note-tether" x1="' + tether.x1 + '" y1="' + tether.y1 + '" x2="' + tether.x2 + '" y2="' + tether.y2 + '"/>');
@@ -2065,7 +2176,8 @@
 
   function fitToScreen() {
     var chart = getActiveChart();
-    var nodeIds = Object.keys(chart.nodes);
+    var visible = computeVisibleNodeIds(chart);
+    var nodeIds = Object.keys(chart.nodes).filter(function (id) { return visible[id]; });
     var noteIds = Object.keys(chart.notes);
     if (!nodeIds.length && !noteIds.length) { panX = stage.clientWidth / 2 - NODE_W / 2; panY = 40; scale = 1; applyTransform(); return; }
     var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -2109,6 +2221,18 @@
     el.addEventListener('pointerdown', onNodeDown);
     el.querySelectorAll('.handle').forEach(function (h) { h.addEventListener('pointerdown', onHandleDown); });
     el.querySelector('.szgrip').addEventListener('pointerdown', onResizeDown);
+    var cbtn = el.querySelector('.collapsebtn');
+    cbtn.addEventListener('pointerdown', function (e) { e.stopPropagation(); });
+    cbtn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      var id = el.dataset.id;
+      var n = getActiveChart().nodes[id];
+      if (!n) return;
+      pushUndo();
+      n.collapsed = !n.collapsed;
+      saveState();
+      render();
+    });
   }
 
   // Live size readout while dragging a grip, so you can hit a number exactly.
@@ -2246,7 +2370,7 @@
   }
 
   function onNodeDown(e) {
-    if (e.target.closest('.handle, .szgrip')) return;
+    if (e.target.closest('.handle, .szgrip, .collapsebtn')) return;
     e.stopPropagation();
     var el = e.currentTarget;
     var id = el.dataset.id;
@@ -2514,7 +2638,7 @@
     var id = uid();
     chart.nodes[id] = {
       id: id, name: '', title: '', detail: '', description: '', privateNote: '', nickname: '', photo: null, x: x, y: y,
-      shape: 'rounded', color: randomColor(), fill: defaultFill(), border: defaultBorder(),
+      shape: 'rounded', color: randomColor(), fill: defaultFill(), border: defaultBorder(), collapsed: false,
       font: '', textColor: '', avatarMode: (chart.badges === 'hide' ? 'none' : 'auto'), layout: 'stack', align: 'center', fontScale: 1, width: NODE_W, height: 0, corner: 14, order: Date.now()
     };
     return id;
@@ -3316,6 +3440,30 @@
   // Centre the viewport on a search hit and flash it so it's easy to spot.
   function jumpTo(item) {
     var chart = getActiveChart();
+    // A search hit folded away behind a collapsed box unfolds first, so
+    // what gets centred and flashed is actually on screen.
+    var changed = false;
+    if (item.kind === 'node') {
+      changed = expandAncestors(chart, item.id);
+    } else if (item.kind === 'note') {
+      var noteForReveal = chart.notes[item.id];
+      if (noteForReveal && noteForReveal.attach && noteForReveal.attach.type === 'node') changed = expandAncestors(chart, noteForReveal.attach.id);
+      else if (noteForReveal && noteForReveal.attach && noteForReveal.attach.type === 'edge') {
+        var edgeForReveal = chart.edges[noteForReveal.attach.id];
+        if (edgeForReveal) {
+          if (expandAncestors(chart, edgeForReveal.from)) changed = true;
+          if (expandAncestors(chart, edgeForReveal.to)) changed = true;
+        }
+      }
+    } else {
+      var edgeItem = chart.edges[item.id];
+      if (edgeItem) {
+        if (expandAncestors(chart, edgeItem.from)) changed = true;
+        if (expandAncestors(chart, edgeItem.to)) changed = true;
+      }
+    }
+    if (changed) { saveState(); render(); }
+
     var cx, cy, el = null;
     if (item.kind === 'node') {
       var n = chart.nodes[item.id];
@@ -3503,6 +3651,18 @@
   }
   $('relayoutBtn').addEventListener('click', function () { pushUndo(); tidyLayout(); saveState(); closeMenu(); render(); fitToScreen(); toast('Tidied up'); });
   $('relayoutBtn2').addEventListener('click', function () { pushUndo(); tidyLayout(); saveState(); render(); fitToScreen(); toast('Tidied up'); });
+
+  // Fold or unfold every box with children in one tap.
+  function setAllCollapsed(value) {
+    var chart = getActiveChart();
+    pushUndo();
+    Object.keys(chart.nodes).forEach(function (id) { chart.nodes[id].collapsed = value; });
+    saveState();
+    render();
+    toast(value ? 'Collapsed all' : 'Expanded all');
+  }
+  $('expandAllBtn').addEventListener('click', function () { setAllCollapsed(false); closeMenu(); });
+  $('collapseAllBtn').addEventListener('click', function () { setAllCollapsed(true); closeMenu(); });
 
   var APPEARANCE_PALETTES = {
     light: { bg: '#f4f6f8', panel: '#ffffff', panel2: '#eef1f4', text: '#1c2530', muted: '#6b7684', line: '#dbe0e6' },
@@ -3859,6 +4019,7 @@
 
   function renderGroups() {
     var chart = getActiveChart();
+    var visible = computeVisibleNodeIds(chart);
     Object.keys(groupEls).forEach(function (id) {
       if (!chart.groups[id]) { groupEls[id].remove(); delete groupEls[id]; }
     });
@@ -3875,6 +4036,10 @@
         groupEls[id] = el;
         wireGroupEvents(el);
       }
+      // A department container with every member folded away hides too,
+      // rather than sitting on screen as an empty box.
+      var hasVisibleMember = nodesInGroup(g).some(function (nid) { return visible[nid]; });
+      el.style.display = hasVisibleMember ? '' : 'none';
       el.style.left = g.x + 'px';
       el.style.top = g.y + 'px';
       el.style.width = g.w + 'px';
@@ -5510,6 +5675,8 @@
     { label: 'Search boxes', keys: 'find search', run: function () { $('searchFab').click(); } },
     { label: 'Fit chart to screen', keys: 'zoom fit', run: function () { $('fitbtn').click(); } },
     { label: 'Tidy layout', keys: 'arrange auto layout', run: function () { $('relayoutBtn2').click(); } },
+    { label: 'Expand all', keys: 'unfold collapse tree', run: function () { setAllCollapsed(false); } },
+    { label: 'Collapse all', keys: 'fold collapse tree', run: function () { setAllCollapsed(true); } },
     { label: 'Chart style', keys: 'design background theme', run: function () { openDesign(); } },
     { label: 'Export and share', keys: 'pdf png csv excel export', run: function () { openExport(); } },
     { label: 'Colour sets', keys: 'palette colours brand', run: function () { openPaletteSheet(); } },
