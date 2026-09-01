@@ -51,6 +51,10 @@ a week of not being opened.
   coloured dot shows on the box. Menu · **Review status** lists everything
   still flagged, filterable, tap any row to jump straight to it. Turns
   scattered "double check this" notes into an actual checklist.
+- **Entity / asset details**: optional structured fields for a box that's a
+  legal entity or asset — type (LLC, corp, trust, DBA, ...), ownership,
+  state of formation, registered agent, and domains owned. Included in
+  CSV/Excel export as their own columns.
 
 ## Large trees
 
@@ -94,7 +98,7 @@ with thicker hairlines. The app honours the system reduced-motion setting.
 
 - **Images and print**: PNG, JPG, SVG, and PDF laid out on Letter or A4 in
   either orientation.
-- **Data**: CSV and Excel with all 24 schema columns, Mermaid, Draw.io, ICS for
+- **Data**: CSV and Excel with all 29 schema columns, Mermaid, Draw.io, ICS for
   shifts, vCard for contacts.
 - **Share a link**: the whole chart is packed into the URL fragment, so it
   works with no account and never reaches a server. Photos and personal notes

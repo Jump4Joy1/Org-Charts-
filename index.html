@@ -735,6 +735,29 @@ input[type=file]{display:none;}
       <div class="hint">A quick data-confidence check — see everything flagged under menu · Review status.</div>
     </div>
 
+    <h4>Entity / asset details</h4>
+    <div class="field">
+      <label>Entity type</label>
+      <select id="fEntityType">
+        <option value="">Not set</option>
+        <option value="llc">LLC</option>
+        <option value="corp">Corporation</option>
+        <option value="partnership">Partnership</option>
+        <option value="sole_prop">Sole proprietorship</option>
+        <option value="trust">Trust</option>
+        <option value="dba">DBA</option>
+        <option value="individual">Individual</option>
+        <option value="other">Other</option>
+      </select>
+    </div>
+    <div class="field"><label>Ownership</label><input id="fOwnershipPct" placeholder="e.g. 50% Jesse / 50% Jacob"></div>
+    <div class="field"><label>State of formation</label><input id="fEntityState" placeholder="e.g. Wyoming"></div>
+    <div class="field"><label>Registered agent</label><input id="fRegisteredAgent" placeholder="e.g. Northwest Registered Agent"></div>
+    <div class="field">
+      <label>Domains owned</label>
+      <textarea id="fEntityDomains" placeholder="One per line" style="min-height:64px;"></textarea>
+    </div>
+
     <h4>Badge</h4>
     <div class="seg" id="segAvatar">
       <button data-v="auto" class="sel">Photo if set</button>

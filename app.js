@@ -364,6 +364,13 @@
     { name: 'Mist', a: '#dfe6f2', b: '#f7fafc', angle: 160 }
   ];
   function defaultBorder() { return { color: '', width: 1, dash: 'solid' }; }
+  function defaultEntity() { return { type: '', ownershipPct: '', state: '', agent: '', domains: '' }; }
+  var ENTITY_TYPES = [
+    { v: '', label: 'Not set' }, { v: 'llc', label: 'LLC' }, { v: 'corp', label: 'Corporation' },
+    { v: 'partnership', label: 'Partnership' }, { v: 'sole_prop', label: 'Sole proprietorship' },
+    { v: 'trust', label: 'Trust' }, { v: 'dba', label: 'DBA' }, { v: 'individual', label: 'Individual' },
+    { v: 'other', label: 'Other' }
+  ];
   function defaultBackground() { return { type: 'solid', color: '', color2: '', texture: 'dots', angle: 135, scale: 1, photo: null, photoW: 0, photoH: 0, fit: 'cover', tint: '', dim: 0 }; }
   function bgBase(bg) { return bg.color2 || 'var(--bg)'; }
 
@@ -392,6 +399,7 @@
       if (!n.shape) n.shape = 'rounded';
       if (!n.fill) n.fill = defaultFill();
       if (!n.border) n.border = defaultBorder();
+      if (!n.entity) n.entity = defaultEntity();
       if (n.font === undefined) n.font = '';
       if (n.textColor === undefined) n.textColor = '';
       if (n.nickname === undefined) n.nickname = '';
@@ -2642,7 +2650,7 @@
     var id = uid();
     chart.nodes[id] = {
       id: id, name: '', title: '', detail: '', description: '', privateNote: '', nickname: '', photo: null, x: x, y: y,
-      shape: 'rounded', color: randomColor(), fill: defaultFill(), border: defaultBorder(), collapsed: false, reviewFlag: '',
+      shape: 'rounded', color: randomColor(), fill: defaultFill(), border: defaultBorder(), collapsed: false, reviewFlag: '', entity: defaultEntity(),
       font: '', textColor: '', avatarMode: (chart.badges === 'hide' ? 'none' : 'auto'), layout: 'stack', align: 'center', fontScale: 1, width: NODE_W, height: 0, corner: 14, order: Date.now()
     };
     return id;
@@ -3009,6 +3017,12 @@
     $('fDescription').value = n.description || '';
     $('fPrivateNote').value = n.privateNote || '';
     wireSeg($('segReviewFlag'), n.reviewFlag || '');
+    var ent = n.entity || defaultEntity();
+    $('fEntityType').value = ent.type || '';
+    $('fOwnershipPct').value = ent.ownershipPct || '';
+    $('fEntityState').value = ent.state || '';
+    $('fRegisteredAgent').value = ent.agent || '';
+    $('fEntityDomains').value = ent.domains || '';
     $('fNickname').value = n.nickname || '';
     $('fNickname').placeholder = 'Auto from name — e.g. ' + initials(n.name || 'Jane Wilson');
     // The badge mode and accent colour both feed the preview, so settle them
@@ -3066,6 +3080,13 @@
     n.description = $('fDescription').value.trim();
     n.privateNote = $('fPrivateNote').value.trim();
     n.reviewFlag = segValue($('segReviewFlag'));
+    n.entity = {
+      type: $('fEntityType').value,
+      ownershipPct: $('fOwnershipPct').value.trim(),
+      state: $('fEntityState').value.trim(),
+      agent: $('fRegisteredAgent').value.trim(),
+      domains: $('fEntityDomains').value.trim()
+    };
     n.nickname = $('fNickname').value.trim();
     n.photo = pendingPhoto || null;
     n.avatarMode = segValue($('segAvatar'));
@@ -4776,7 +4797,8 @@
   var CSV_COLUMNS = [
     'id', 'name', 'title', 'detail', 'description', 'review_flag', 'nickname', 'reports_to', 'status',
     'phone', 'email', 'shift_days', 'shift_start', 'shift_end', 'on_call',
-    'certs', 'tasks', 'backup_of', 'shape', 'fill', 'x', 'y', 'width', 'height'
+    'certs', 'tasks', 'backup_of', 'entity_type', 'ownership', 'entity_state', 'registered_agent', 'domains',
+    'shape', 'fill', 'x', 'y', 'width', 'height'
   ];
 
   function parentOf(chart, id) {
@@ -4810,6 +4832,11 @@
       certs: (n.certs || []).map(function (c) { return c.name + (c.expires ? '@' + c.expires : ''); }).join('; '),
       tasks: (n.tasks || []).map(function (t) { return (t.done ? '[x] ' : '[ ] ') + t.text; }).join('; '),
       backup_of: n.backupOf || '',
+      entity_type: (n.entity && n.entity.type) || '',
+      ownership: (n.entity && n.entity.ownershipPct) || '',
+      entity_state: (n.entity && n.entity.state) || '',
+      registered_agent: (n.entity && n.entity.agent) || '',
+      domains: (n.entity && n.entity.domains) || '',
       shape: n.shape || 'rounded',
       fill: (n.fill && n.fill.color) || '',
       x: Math.round(n.x), y: Math.round(n.y),
