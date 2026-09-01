@@ -399,6 +399,7 @@
       if (n.description === undefined) n.description = '';
       if (n.privateNote === undefined) n.privateNote = '';
       if (n.collapsed === undefined) n.collapsed = false;
+      if (n.reviewFlag === undefined) n.reviewFlag = '';
       if (!n.avatarMode) n.avatarMode = 'auto';
       if (!n.layout) n.layout = 'stack';
       if (!n.align) n.align = (n.layout === 'row') ? 'left' : 'center';
@@ -1868,6 +1869,7 @@
           '<div class="szgrip"></div>' +
           '<div class="statusdot"></div><div class="certflag"></div>' +
           '<div class="detailflag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M5 5h14M5 12h14M5 19h9"/></svg></div>' +
+          '<div class="reviewflag"></div>' +
           '<button type="button" class="collapsebtn"><span class="ccount"></span></button>';
         canvas.appendChild(el);
         nodeEls[id] = el;
@@ -1888,6 +1890,8 @@
       dt.textContent = n.detail || '';
       dt.style.display = n.detail ? 'block' : 'none';
       el.querySelector('.detailflag').classList.toggle('show', !!(n.description || n.privateNote));
+      var rf = el.querySelector('.reviewflag');
+      rf.className = 'reviewflag' + (n.reviewFlag ? ' show rf-' + n.reviewFlag : '');
       var hasKids = !!(kids[id] && kids[id].length);
       var cbtn = el.querySelector('.collapsebtn');
       cbtn.classList.toggle('show', hasKids);
@@ -2638,7 +2642,7 @@
     var id = uid();
     chart.nodes[id] = {
       id: id, name: '', title: '', detail: '', description: '', privateNote: '', nickname: '', photo: null, x: x, y: y,
-      shape: 'rounded', color: randomColor(), fill: defaultFill(), border: defaultBorder(), collapsed: false,
+      shape: 'rounded', color: randomColor(), fill: defaultFill(), border: defaultBorder(), collapsed: false, reviewFlag: '',
       font: '', textColor: '', avatarMode: (chart.badges === 'hide' ? 'none' : 'auto'), layout: 'stack', align: 'center', fontScale: 1, width: NODE_W, height: 0, corner: 14, order: Date.now()
     };
     return id;
@@ -3004,6 +3008,7 @@
     $('fDetail').value = n.detail || '';
     $('fDescription').value = n.description || '';
     $('fPrivateNote').value = n.privateNote || '';
+    wireSeg($('segReviewFlag'), n.reviewFlag || '');
     $('fNickname').value = n.nickname || '';
     $('fNickname').placeholder = 'Auto from name — e.g. ' + initials(n.name || 'Jane Wilson');
     // The badge mode and accent colour both feed the preview, so settle them
@@ -3060,6 +3065,7 @@
     n.detail = $('fDetail').value.trim();
     n.description = $('fDescription').value.trim();
     n.privateNote = $('fPrivateNote').value.trim();
+    n.reviewFlag = segValue($('segReviewFlag'));
     n.nickname = $('fNickname').value.trim();
     n.photo = pendingPhoto || null;
     n.avatarMode = segValue($('segAvatar'));
@@ -3499,6 +3505,75 @@
       setTimeout(function () { el.classList.remove('found'); }, 1600);
     }
   }
+
+  // ---------------------------------------------------------------------
+  // Review status — a data-confidence checklist across the chart
+  // ---------------------------------------------------------------------
+  var reviewBackdrop = $('reviewBackdrop'), reviewSheet = $('reviewSheet');
+  var reviewResults = $('reviewResults'), reviewSummary = $('reviewSummary');
+  var REVIEW_LABELS = { verified: 'Verified', review: 'Needs review', unresolved: 'Unresolved', '': 'Unflagged' };
+
+  function reviewCounts() {
+    var chart = getActiveChart();
+    var out = { verified: 0, review: 0, unresolved: 0, '': 0 };
+    Object.keys(chart.nodes).forEach(function (id) {
+      var f = chart.nodes[id].reviewFlag || '';
+      out[f] = (out[f] || 0) + 1;
+    });
+    return out;
+  }
+
+  function renderReviewResults() {
+    var chart = getActiveChart();
+    var filter = segValue($('segReviewFilter'));
+    var counts = reviewCounts();
+    reviewSummary.textContent = counts.unresolved + ' unresolved · ' + counts.review + ' needs review · ' +
+      counts.verified + ' verified · ' + counts[''] + ' unflagged';
+    var items = Object.keys(chart.nodes).map(function (id) { return chart.nodes[id]; }).filter(function (n) {
+      if (filter === 'attention') return n.reviewFlag === 'unresolved' || n.reviewFlag === 'review';
+      if (filter === 'verified') return n.reviewFlag === 'verified';
+      return true;
+    }).sort(function (a, b) {
+      var order = { unresolved: 0, review: 1, verified: 2, '': 3 };
+      var da = order[a.reviewFlag || ''], db = order[b.reviewFlag || ''];
+      return da - db || (a.name || '').localeCompare(b.name || '');
+    });
+    reviewResults.innerHTML = '';
+    if (!items.length) {
+      var empty = document.createElement('p');
+      empty.className = 'smallmuted';
+      empty.textContent = filter === 'attention' ? 'Nothing flagged for review — clean.' : 'No boxes match this filter.';
+      reviewResults.appendChild(empty);
+      return;
+    }
+    items.forEach(function (n) {
+      var row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'searchresult';
+      var av = document.createElement('div');
+      av.className = 'ravatar';
+      if (n.photo) { av.style.background = "center/cover no-repeat url('" + n.photo + "')"; }
+      else { av.style.background = n.color || COLOR_SWATCHES[0]; av.textContent = initials(n.name || '?'); }
+      var txt = document.createElement('div');
+      txt.className = 'rtext';
+      txt.innerHTML = '<div class="rname">' + escapeHtml(n.name || 'Unnamed') + '</div>' +
+        '<div class="rsub">' + REVIEW_LABELS[n.reviewFlag || ''] + (n.title ? ' · ' + escapeHtml(n.title) : '') + '</div>';
+      row.appendChild(av); row.appendChild(txt);
+      row.addEventListener('click', function () { closeReview(); jumpTo({ kind: 'node', id: n.id }); });
+      reviewResults.appendChild(row);
+    });
+  }
+
+  function openReview() {
+    wireSeg($('segReviewFilter'), 'attention', renderReviewResults);
+    renderReviewResults();
+    reviewBackdrop.classList.add('show');
+    reviewSheet.classList.add('show');
+  }
+  function closeReview() { reviewBackdrop.classList.remove('show'); reviewSheet.classList.remove('show'); }
+  $('reviewOpenBtn').addEventListener('click', function () { closeMenu(); openReview(); });
+  $('reviewCloseBtn').addEventListener('click', closeReview);
+  reviewBackdrop.addEventListener('click', function (e) { if (e.target === reviewBackdrop) closeReview(); });
 
   // ---------------------------------------------------------------------
   // Menu sheet
@@ -4699,7 +4774,7 @@
   // ---------------------------------------------------------------------
 
   var CSV_COLUMNS = [
-    'id', 'name', 'title', 'detail', 'description', 'nickname', 'reports_to', 'status',
+    'id', 'name', 'title', 'detail', 'description', 'review_flag', 'nickname', 'reports_to', 'status',
     'phone', 'email', 'shift_days', 'shift_start', 'shift_end', 'on_call',
     'certs', 'tasks', 'backup_of', 'shape', 'fill', 'x', 'y', 'width', 'height'
   ];
@@ -4722,6 +4797,7 @@
       title: n.title || '',
       detail: n.detail || '',
       description: n.description || '',
+      review_flag: n.reviewFlag || '',
       nickname: n.nickname || '',
       reports_to: parentOf(chart, n.id),
       status: n.status || 'none',
@@ -5677,6 +5753,7 @@
     { label: 'Tidy layout', keys: 'arrange auto layout', run: function () { $('relayoutBtn2').click(); } },
     { label: 'Expand all', keys: 'unfold collapse tree', run: function () { setAllCollapsed(false); } },
     { label: 'Collapse all', keys: 'fold collapse tree', run: function () { setAllCollapsed(true); } },
+    { label: 'Review status', keys: 'flag verified unresolved checklist confidence', run: function () { openReview(); } },
     { label: 'Chart style', keys: 'design background theme', run: function () { openDesign(); } },
     { label: 'Export and share', keys: 'pdf png csv excel export', run: function () { openExport(); } },
     { label: 'Colour sets', keys: 'palette colours brand', run: function () { openPaletteSheet(); } },

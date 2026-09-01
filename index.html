@@ -536,6 +536,15 @@ svg#guides{position:absolute; left:0; top:0; overflow:visible; pointer-events:no
 .node .collapsebtn::before{content:'\2212'; font-size:13px; font-weight:800; line-height:1;}
 .node .collapsebtn.collapsed::before{content:'+';}
 .node .collapsebtn .ccount{font-size:10px; font-weight:700; line-height:1;}
+.node .reviewflag{
+  position:absolute; left:50%; top:-6px; transform:translateX(-50%);
+  width:11px; height:11px; border-radius:50%; display:none; z-index:8;
+  border:2px solid var(--panel);
+}
+.node .reviewflag.show{display:block;}
+.node .reviewflag.rf-verified{background:var(--good,#2f9e6e);}
+.node .reviewflag.rf-review{background:var(--warn,#c2762a);}
+.node .reviewflag.rf-unresolved{background:var(--danger);}
 
 /* Quick actions from a long press */
 .quickgrid{display:grid; grid-template-columns:repeat(2,1fr); gap:10px; margin-top:4px;}
@@ -714,6 +723,16 @@ input[type=file]{display:none;}
       <label>Personal notes</label>
       <textarea id="fPrivateNote" placeholder="Just for you — reminders, unresolved questions, things to check." style="min-height:80px;"></textarea>
       <div class="hint">Private. Left out of Share a link and never sent anywhere — only in your own Export JSON backups and synced to your own devices.</div>
+    </div>
+    <div class="field">
+      <label>Review flag</label>
+      <div class="seg" id="segReviewFlag">
+        <button data-v="" class="sel">None</button>
+        <button data-v="verified">Verified</button>
+        <button data-v="review">Needs review</button>
+        <button data-v="unresolved">Unresolved</button>
+      </div>
+      <div class="hint">A quick data-confidence check — see everything flagged under menu · Review status.</div>
     </div>
 
     <h4>Badge</h4>
@@ -1055,6 +1074,23 @@ input[type=file]{display:none;}
   </div>
 </div>
 
+<!-- Review status sheet -->
+<div class="sheet-backdrop" id="reviewBackdrop">
+  <div class="sheet" id="reviewSheet">
+    <div class="sheet-handle"></div>
+    <h3>Review status</h3>
+    <p class="smallmuted">A quick data-confidence checklist across this chart — flag a box from its edit screen, then come back here to see everything that still needs a look.</p>
+    <div class="seg" id="segReviewFilter" style="margin-bottom:10px;">
+      <button data-v="attention" class="sel">Needs attention</button>
+      <button data-v="verified">Verified</button>
+      <button data-v="all">All boxes</button>
+    </div>
+    <div id="reviewSummary" class="smallmuted" style="margin-bottom:8px;"></div>
+    <div id="reviewResults"></div>
+    <button class="btn ghost" id="reviewCloseBtn" style="margin-top:10px;">Close</button>
+  </div>
+</div>
+
 <!-- Charts / menu sheet -->
 <div class="sheet-backdrop" id="menuBackdrop">
   <div class="sheet" id="menuSheet">
@@ -1068,6 +1104,9 @@ input[type=file]{display:none;}
     <div class="btnrow">
       <button class="btn secondary" id="expandAllBtn">Expand all</button>
       <button class="btn secondary" id="collapseAllBtn">Collapse all</button>
+    </div>
+    <div class="btnrow">
+      <button class="btn secondary" id="reviewOpenBtn" style="flex:1;">Review status</button>
     </div>
     <div class="divider"></div>
     <div class="btnrow">
