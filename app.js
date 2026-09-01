@@ -396,6 +396,8 @@
       if (n.textColor === undefined) n.textColor = '';
       if (n.nickname === undefined) n.nickname = '';
       if (n.detail === undefined) n.detail = '';
+      if (n.description === undefined) n.description = '';
+      if (n.privateNote === undefined) n.privateNote = '';
       if (!n.avatarMode) n.avatarMode = 'auto';
       if (!n.layout) n.layout = 'stack';
       if (!n.align) n.align = (n.layout === 'row') ? 'left' : 'center';
@@ -1771,7 +1773,8 @@
           '<div class="handle n" data-dir="n"></div><div class="handle s" data-dir="s"></div>' +
           '<div class="handle e" data-dir="e"></div><div class="handle w" data-dir="w"></div>' +
           '<div class="szgrip"></div>' +
-          '<div class="statusdot"></div><div class="certflag"></div>';
+          '<div class="statusdot"></div><div class="certflag"></div>' +
+          '<div class="detailflag"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M5 5h14M5 12h14M5 19h9"/></svg></div>';
         canvas.appendChild(el);
         nodeEls[id] = el;
         wireNodeEvents(el);
@@ -1789,6 +1792,7 @@
       var dt = el.querySelector('.ndetail');
       dt.textContent = n.detail || '';
       dt.style.display = n.detail ? 'block' : 'none';
+      el.querySelector('.detailflag').classList.toggle('show', !!(n.description || n.privateNote));
       applyNodeStyle(el, n);
     });
 
@@ -2509,7 +2513,7 @@
     var chart = getActiveChart();
     var id = uid();
     chart.nodes[id] = {
-      id: id, name: '', title: '', detail: '', nickname: '', photo: null, x: x, y: y,
+      id: id, name: '', title: '', detail: '', description: '', privateNote: '', nickname: '', photo: null, x: x, y: y,
       shape: 'rounded', color: randomColor(), fill: defaultFill(), border: defaultBorder(),
       font: '', textColor: '', avatarMode: (chart.badges === 'hide' ? 'none' : 'auto'), layout: 'stack', align: 'center', fontScale: 1, width: NODE_W, height: 0, corner: 14, order: Date.now()
     };
@@ -2874,6 +2878,8 @@
     fName.value = n.name || '';
     fTitle.value = n.title || '';
     $('fDetail').value = n.detail || '';
+    $('fDescription').value = n.description || '';
+    $('fPrivateNote').value = n.privateNote || '';
     $('fNickname').value = n.nickname || '';
     $('fNickname').placeholder = 'Auto from name — e.g. ' + initials(n.name || 'Jane Wilson');
     // The badge mode and accent colour both feed the preview, so settle them
@@ -2928,6 +2934,8 @@
     n.name = fName.value.trim() || 'Unnamed';
     n.title = fTitle.value.trim();
     n.detail = $('fDetail').value.trim();
+    n.description = $('fDescription').value.trim();
+    n.privateNote = $('fPrivateNote').value.trim();
     n.nickname = $('fNickname').value.trim();
     n.photo = pendingPhoto || null;
     n.avatarMode = segValue($('segAvatar'));
@@ -4526,7 +4534,7 @@
   // ---------------------------------------------------------------------
 
   var CSV_COLUMNS = [
-    'id', 'name', 'title', 'detail', 'nickname', 'reports_to', 'status',
+    'id', 'name', 'title', 'detail', 'description', 'nickname', 'reports_to', 'status',
     'phone', 'email', 'shift_days', 'shift_start', 'shift_end', 'on_call',
     'certs', 'tasks', 'backup_of', 'shape', 'fill', 'x', 'y', 'width', 'height'
   ];
@@ -4548,6 +4556,7 @@
       name: n.name || '',
       title: n.title || '',
       detail: n.detail || '',
+      description: n.description || '',
       nickname: n.nickname || '',
       reports_to: parentOf(chart, n.id),
       status: n.status || 'none',
@@ -4797,12 +4806,13 @@
   // hundreds of kilobytes and would blow past what a URL can carry.
   function chartForLink() {
     var chart = JSON.parse(JSON.stringify(getActiveChart()));
-    var stripped = 0;
+    var stripped = 0, notesStripped = 0;
     Object.keys(chart.nodes).forEach(function (id) {
       if (chart.nodes[id].photo) { chart.nodes[id].photo = null; stripped++; }
+      if (chart.nodes[id].privateNote) { chart.nodes[id].privateNote = ''; notesStripped++; }
     });
     delete chart.updatedAt;
-    return { chart: chart, stripped: stripped };
+    return { chart: chart, stripped: stripped, notesStripped: notesStripped };
   }
   function encodeChartLink(chart) {
     var json = JSON.stringify(chart);

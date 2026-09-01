@@ -42,6 +42,11 @@ a week of not being opened.
   becomes a pill so it stays readable.
 - **Photo only** fills the whole box with a picture, clipped to its shape.
 - **Apply this look to all boxes** copies any subset of the styling.
+- **Details and personal notes**: open a box for a full description (what a
+  role or line of business is, what someone taking it over needs to know) and
+  a separate personal-notes field just for you. A small mark on the box shows
+  when either is filled in. Details travel with the chart everywhere; personal
+  notes stay out of Share a link and only ever leave via your own Export JSON.
 
 ## Canvas
 
@@ -70,12 +75,13 @@ with thicker hairlines. The app honours the system reduced-motion setting.
 
 - **Images and print**: PNG, JPG, SVG, and PDF laid out on Letter or A4 in
   either orientation.
-- **Data**: CSV and Excel with all 22 schema columns, Mermaid, Draw.io, ICS for
+- **Data**: CSV and Excel with all 23 schema columns, Mermaid, Draw.io, ICS for
   shifts, vCard for contacts.
 - **Share a link**: the whole chart is packed into the URL fragment, so it
-  works with no account and never reaches a server. Photos are left out to keep
-  links short.
-- **Backup**: Export and Import JSON.
+  works with no account and never reaches a server. Photos and personal notes
+  are left out — this is what you hand to other people.
+- **Backup**: Export and Import JSON — your own full copy, personal notes
+  included.
 
 ## Sync across devices
 

@@ -385,6 +385,7 @@ svg#guides{position:absolute; left:0; top:0; overflow:visible; pointer-events:no
   color:var(--text); font-size:16px; font-family:inherit;
 }
 .field textarea{resize:vertical; min-height:64px;}
+.field .hint{font-size:11.5px; color:var(--muted); margin-top:5px; line-height:1.4;}
 .colors{display:flex; gap:8px; flex-wrap:wrap; margin-top:2px; align-items:center;}
 .swatch{width:30px; height:30px; border-radius:50%; border:2px solid transparent; flex:0 0 auto; padding:0;}
 .swatch.sel{border-color:var(--text);}
@@ -517,6 +518,13 @@ svg#guides{position:absolute; left:0; top:0; overflow:visible; pointer-events:no
 .node .certflag.show{display:block;}
 .node.bus-risk .shapelayer path{stroke-dasharray:6 4;}
 .node.bus-risk .certflag{background:var(--warn,#c2762a);}
+.node .detailflag{
+  position:absolute; left:-6px; bottom:-6px; width:15px; height:15px; border-radius:50%;
+  display:none; align-items:center; justify-content:center; z-index:7;
+  background:var(--accent); color:#fff; border:2px solid var(--panel);
+}
+.node .detailflag.show{display:flex;}
+.node .detailflag svg{width:8px; height:8px;}
 
 /* Quick actions from a long press */
 .quickgrid{display:grid; grid-template-columns:repeat(2,1fr); gap:10px; margin-top:4px;}
@@ -684,6 +692,18 @@ input[type=file]{display:none;}
     <div class="field"><label>Name</label><input id="fName" placeholder="Jane Rivera"></div>
     <div class="field"><label>Title / Role</label><input id="fTitle" placeholder="VP of Operations"></div>
     <div class="field"><label>Extra line (optional)</label><input id="fDetail" placeholder="Operations · Longview"></div>
+
+    <h4>Details</h4>
+    <div class="field">
+      <label>Description</label>
+      <textarea id="fDescription" placeholder="What this role or line of business is, and what someone taking it over needs to know." style="min-height:110px;"></textarea>
+      <div class="hint">Shown to anyone who opens this chart — included in exports and shared links.</div>
+    </div>
+    <div class="field">
+      <label>Personal notes</label>
+      <textarea id="fPrivateNote" placeholder="Just for you — reminders, unresolved questions, things to check." style="min-height:80px;"></textarea>
+      <div class="hint">Private. Left out of Share a link and never sent anywhere — only in your own Export JSON backups and synced to your own devices.</div>
+    </div>
 
     <h4>Badge</h4>
     <div class="seg" id="segAvatar">
@@ -1235,14 +1255,14 @@ input[type=file]{display:none;}
     <div class="btnrow">
       <button class="btn secondary" id="shareLinkBtn" style="flex:1;">Copy a link to this chart</button>
     </div>
-    <p class="smallmuted">The whole chart is packed into the link, so it works without an account. Photos make links very long, so they are left out of the link.</p>
+    <p class="smallmuted">The whole chart is packed into the link, so it works without an account. Photos make links very long, so they are left out — and personal notes are always left out, since this is what you hand to other people.</p>
 
     <h4>Backup</h4>
     <div class="btnrow">
       <button class="btn secondary" id="exportBtn">Export JSON</button>
       <button class="btn secondary" id="importBtn">Import JSON</button>
     </div>
-    <p class="smallmuted">PDF opens the print sheet — choose "Save to Files" or "Save as PDF" to keep a crisp vector copy. SVG is a scalable vector file you can open or edit elsewhere.</p>
+    <p class="smallmuted">PDF opens the print sheet — choose "Save to Files" or "Save as PDF" to keep a crisp vector copy. SVG is a scalable vector file you can open or edit elsewhere. Export JSON is your own full copy, personal notes included — use Share a link instead when handing a chart to someone else.</p>
     <button class="btn ghost" id="exportCloseBtn" style="margin-top:6px;">Close</button>
   </div>
 </div>
