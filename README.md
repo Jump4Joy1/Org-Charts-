@@ -162,8 +162,10 @@ as JSON whenever it changes, debounced to two seconds. No account, no OAuth.
 
 Status badges, contacts and one-tap Call / Text / WhatsApp / Email,
 certification tracking with expiry warnings, shift scheduling with calendar
-export, per-role task lists, and the succession view that flags any role with
-nobody backing it up.
+export, per-role task lists, and **Succession risk** — menu · Succession
+risk lists every role with people reporting to it and nobody set as backup
+(Ops · Backup for), tap a row to jump straight to it, with the at-risk boxes
+also highlighted on the canvas.
 
 Checkout is **not** wired up. A static site cannot verify a payment, so the
 button is inert until `PRO_CHECKOUT_URL` in `app.js` points at a Stripe payment

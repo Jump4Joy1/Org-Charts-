@@ -4726,17 +4726,59 @@
   $('quickEdit').addEventListener('click', function () { var id = quickId; closeQuickSheet(); if (id) openEditSheet(id); });
   quickBackdrop.addEventListener('click', function (e) { if (e.target === quickBackdrop) closeQuickSheet(); });
 
-  // ---- succession view -------------------------------------------------
-  $('busFactorBtn').addEventListener('click', function () {
+  // ---- succession / key-person risk view --------------------------------
+  var succBackdrop = $('succBackdrop'), succSheet = $('succSheet');
+  var succResults = $('succResults'), succSummary = $('succSummary');
+
+  function renderSuccessionResults() {
+    var chart = getActiveChart();
+    var riskIds = busRiskIds(chart);
+    succSummary.textContent = riskIds.length
+      ? riskIds.length + ' role' + (riskIds.length === 1 ? '' : 's') + ' with people reporting to it and no backup set'
+      : 'Every role with reports has a backup — no single points of failure found.';
+    succResults.innerHTML = '';
+    riskIds.forEach(function (id) {
+      var n = chart.nodes[id];
+      if (!n) return;
+      var reportCount = Object.keys(chart.edges).filter(function (eid) { return chart.edges[eid].from === id; }).length;
+      var row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'searchresult';
+      var av = document.createElement('div');
+      av.className = 'ravatar';
+      if (n.photo) { av.style.background = "center/cover no-repeat url('" + n.photo + "')"; }
+      else { av.style.background = n.color || COLOR_SWATCHES[0]; av.textContent = initials(n.name || '?'); }
+      var txt = document.createElement('div');
+      txt.className = 'rtext';
+      txt.innerHTML = '<div class="rname">' + escapeHtml(n.name || 'Unnamed') + '</div>' +
+        '<div class="rsub">' + reportCount + ' report' + (reportCount === 1 ? '' : 's') + ', no one backed up to step in</div>';
+      row.appendChild(av); row.appendChild(txt);
+      row.addEventListener('click', function () { closeSuccession(); jumpTo({ kind: 'node', id: id }); });
+      succResults.appendChild(row);
+    });
+  }
+
+  function updateSuccToggleLabel() {
+    $('succToggleBtn').textContent = busFactorOn ? 'Hide highlighting on canvas' : 'Show highlighting on canvas';
+  }
+  function openSuccession() {
     if (!requirePro('The succession view')) return;
-    busFactorOn = !busFactorOn;
+    busFactorOn = true;
     closeMenu();
     render();
-    var chart = getActiveChart();
-    var n = busRiskIds(chart).length;
-    toast(busFactorOn
-      ? (n ? n + ' role' + (n === 1 ? '' : 's') + ' with no backup' : 'Every role has a backup')
-      : 'Succession view off');
+    renderSuccessionResults();
+    updateSuccToggleLabel();
+    succBackdrop.classList.add('show');
+    succSheet.classList.add('show');
+  }
+  function closeSuccession() { succBackdrop.classList.remove('show'); succSheet.classList.remove('show'); }
+  $('busFactorBtn').addEventListener('click', openSuccession);
+  $('succCloseBtn').addEventListener('click', closeSuccession);
+  succBackdrop.addEventListener('click', function (e) { if (e.target === succBackdrop) closeSuccession(); });
+  $('succToggleBtn').addEventListener('click', function () {
+    busFactorOn = !busFactorOn;
+    render();
+    updateSuccToggleLabel();
   });
 
   // ---- Pro sheet -------------------------------------------------------

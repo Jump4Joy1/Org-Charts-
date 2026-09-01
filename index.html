@@ -1114,6 +1114,21 @@ input[type=file]{display:none;}
   </div>
 </div>
 
+<!-- Succession / key-person risk sheet -->
+<div class="sheet-backdrop" id="succBackdrop">
+  <div class="sheet" id="succSheet">
+    <div class="sheet-handle"></div>
+    <h3>Succession risk</h3>
+    <p class="smallmuted">Every role with people reporting to it, and nobody set as its backup — a single point of failure if that person is out. Set a backup for a role from its edit screen (Ops · Backup for).</p>
+    <div id="succSummary" class="smallmuted" style="margin-bottom:8px;"></div>
+    <div id="succResults"></div>
+    <div class="btnrow" style="margin-top:10px;">
+      <button class="btn secondary" id="succToggleBtn" style="flex:1;">Hide highlighting on canvas</button>
+    </div>
+    <button class="btn ghost" id="succCloseBtn" style="margin-top:6px;">Close</button>
+  </div>
+</div>
+
 <!-- Charts / menu sheet -->
 <div class="sheet-backdrop" id="menuBackdrop">
   <div class="sheet" id="menuSheet">
